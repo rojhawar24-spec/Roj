@@ -124,7 +124,8 @@ function sameOriginGuard(req,res,next){
   const origin=req.get('origin');
   if (!origin) return next();
   try {
-    const allowedOrigins=new Set([isProd && process.env.BASE_URL ? new URL(process.env.BASE_URL).origin : `${req.protocol}://${req.get('host')}`]);
+    const allowedOrigins=new Set([`${req.protocol}://${req.get('host')}`]);
+    if(isProd&&process.env.BASE_URL) allowedOrigins.add(new URL(process.env.BASE_URL).origin);
     if(process.env.VERCEL==='1'&&process.env.VERCEL_URL){const deploymentUrl=process.env.VERCEL_URL.startsWith('http')?process.env.VERCEL_URL:`https://${process.env.VERCEL_URL}`;allowedOrigins.add(new URL(deploymentUrl).origin);}
     if (!allowedOrigins.has(new URL(origin).origin)) return res.status(403).render('error',{title:'Request blocked',message:'This request came from an unexpected origin.'});
   } catch { return res.status(403).render('error',{title:'Request blocked',message:'This request came from an unexpected origin.'}); }

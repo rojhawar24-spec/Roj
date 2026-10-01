@@ -60,6 +60,21 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   assert.equal(deploymentOriginLogin.status, 200);
   assert.match(await deploymentOriginLogin.text(), /Invalid email or password\./);
 
+  const previousDeploymentUrl = process.env.VERCEL_URL;
+  delete process.env.VERCEL_URL;
+  const requestHostOriginLogin = await fetch(`${base}/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: originCookie,
+      origin: base
+    },
+    body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
+  });
+  process.env.VERCEL_URL = previousDeploymentUrl;
+  assert.equal(requestHostOriginLogin.status, 200);
+  assert.match(await requestHostOriginLogin.text(), /Invalid email or password\./);
+
   const rejectedOrigin = await fetch(`${base}/login`, {
     method: 'POST',
     headers: {
