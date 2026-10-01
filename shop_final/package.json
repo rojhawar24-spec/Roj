@@ -14,10 +14,10 @@
     "audit": "npm run check && npm test && npm run audit:static && node scripts/template-audit.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "24.x"
   },
   "dependencies": {
-    "better-sqlite3": "11.8.1",
+    "better-sqlite3": "13.0.3",
     "cookie-parser": "1.4.7",
     "dotenv": "16.6.1",
     "ejs": "3.1.10",
