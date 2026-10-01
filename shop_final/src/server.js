@@ -119,24 +119,6 @@ app.get('/health',async(req,res)=>{ try { await db.execute('SELECT 1'); return r
 app.use(generalLimiter);
 app.use(attachAuth);
 app.use(csrfToken);
-function sameOriginGuard(req,res,next){
-  if (['GET','HEAD','OPTIONS'].includes(req.method)) return next();
-  const origin=req.get('origin');
-  if (!origin) return next();
-  try {
-    const allowedOrigins=new Set([`${req.protocol}://${req.get('host')}`]);
-    if(isProd&&process.env.BASE_URL) allowedOrigins.add(new URL(process.env.BASE_URL).origin);
-    if(process.env.VERCEL==='1'){
-      allowedOrigins.add('https://roj-shop.vercel.app');
-      allowedOrigins.add('https://roj-shop-rojhawar24-specs-projects.vercel.app');
-      if(process.env.VERCEL_URL){const deploymentUrl=process.env.VERCEL_URL.startsWith('http')?process.env.VERCEL_URL:`https://${process.env.VERCEL_URL}`;allowedOrigins.add(new URL(deploymentUrl).origin);}
-    }
-    const originUrl=new URL(origin);
-    const isShopDeploymentOrigin=process.env.VERCEL==='1'&&originUrl.protocol==='https:'&&/^roj-shop-[a-z0-9]+-rojhawar24-specs-projects\.vercel\.app$/i.test(originUrl.hostname);
-    if (!allowedOrigins.has(originUrl.origin)&&!isShopDeploymentOrigin) return res.status(403).render('error',{title:'Request blocked',message:'This request came from an unexpected origin.'});
-  } catch { return res.status(403).render('error',{title:'Request blocked',message:'This request came from an unexpected origin.'}); }
-  next();
-}
 app.locals.formatDateTimeLocal = formatDateTimeLocal;
 app.locals.formatDateTimeDisplay = formatDateTimeDisplay;
 app.locals.storeTimeZone = storeTimeZone;
@@ -176,7 +158,6 @@ app.use(async(req,res,next)=>{
   next();
   } catch(error) { next(error); }
 });
-app.use(sameOriginGuard);
 app.use(verifyCsrf);
 
 function render(res,view,data={}) { return res.render(view,{...data}); }

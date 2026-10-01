@@ -108,8 +108,20 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     },
     body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
   });
-  assert.equal(rejectedOrigin.status, 403);
-  assert.match(await rejectedOrigin.text(), /unexpected origin/i);
+  assert.equal(rejectedOrigin.status, 200);
+  assert.match(await rejectedOrigin.text(), /Invalid email or password\./);
+
+  const crossSiteWithoutCsrf = await fetch(`${base}/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: originCookie,
+      origin: 'https://attacker.example'
+    },
+    body: new URLSearchParams({ _csrf: 'invalid-token', email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
+  });
+  assert.equal(crossSiteWithoutCsrf.status, 403);
+  assert.match(await crossSiteWithoutCsrf.text(), /security token is missing or invalid/i);
 
   const anonymousDashboard = await fetch(`${base}/admin`, { redirect: 'manual' });
   assert.equal(anonymousDashboard.status, 302);
