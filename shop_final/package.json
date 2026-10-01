@@ -1,0 +1,29 @@
+{
+  "name": "universal-shop",
+  "version": "2.5.0",
+  "private": true,
+  "description": "Production-minded universal webshop starter with secure admin, stories, discounts, inventory and optional AI.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/server.js && node --check src/db.js && node --check src/auth.js && node --check src/security.js && node --check src/services/payment.js && node --check src/services/ai.js && node --check scripts/load-test.mjs && node --check scripts/static-audit.mjs && node --check test/security.test.js && node --check test/sale-readiness.test.js && node --check scripts/template-audit.mjs",
+    "audit:static": "node scripts/static-audit.mjs",
+    "load:local": "node scripts/load-test.mjs",
+    "audit": "npm run check && npm test && npm run audit:static && node scripts/template-audit.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "11.8.1",
+    "cookie-parser": "1.4.7",
+    "dotenv": "16.6.1",
+    "ejs": "3.1.10",
+    "express": "5.1.0",
+    "express-rate-limit": "8.0.1",
+    "helmet": "8.1.0",
+    "multer": "2.0.2"
+  }
+}

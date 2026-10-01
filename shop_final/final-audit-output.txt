@@ -1,0 +1,370 @@
+
+> universal-shop@2.5.0 audit
+> npm run check && npm test && npm run audit:static && node scripts/template-audit.mjs
+
+
+> universal-shop@2.5.0 check
+> node --check src/server.js && node --check src/db.js && node --check src/auth.js && node --check src/security.js && node --check src/services/payment.js && node --check src/services/ai.js && node --check scripts/load-test.mjs && node --check scripts/static-audit.mjs && node --check test/security.test.js && node --check test/sale-readiness.test.js && node --check scripts/template-audit.mjs
+
+
+> universal-shop@2.5.0 test
+> node --test test/*.test.js
+
+TAP version 13
+# Subtest: per-product automatic discount examples are correct
+ok 1 - per-product automatic discount examples are correct
+  ---
+  duration_ms: 0.936013
+  type: 'test'
+  ...
+# Subtest: invalid product discount values are safely normalized
+ok 2 - invalid product discount values are safely normalized
+  ---
+  duration_ms: 0.158889
+  type: 'test'
+  ...
+# Subtest: product discount never produces a zero or negative price
+ok 3 - product discount never produces a zero or negative price
+  ---
+  duration_ms: 0.202292
+  type: 'test'
+  ...
+# Subtest: email integration stays disabled until key and sender are configured
+ok 4 - email integration stays disabled until key and sender are configured
+  ---
+  duration_ms: 1.096088
+  type: 'test'
+  ...
+# Subtest: order confirmation uses a stable idempotency key and escapes customer content
+ok 5 - order confirmation uses a stable idempotency key and escapes customer content
+  ---
+  duration_ms: 19.599598
+  type: 'test'
+  ...
+# Subtest: checkout collects contact and delivery location and manager can see it
+ok 6 - checkout collects contact and delivery location and manager can see it
+  ---
+  duration_ms: 2.452571
+  type: 'test'
+  ...
+# Subtest: AI is independently switchable from the manager UI
+ok 7 - AI is independently switchable from the manager UI
+  ---
+  duration_ms: 1.733463
+  type: 'test'
+  ...
+# Subtest: layout has one main region and no inline styles under the strict CSP
+ok 8 - layout has one main region and no inline styles under the strict CSP
+  ---
+  duration_ms: 3.435297
+  type: 'test'
+  ...
+# Subtest: database schema block contains only SQL and customer_phone migration runs outside it
+ok 9 - database schema block contains only SQL and customer_phone migration runs outside it
+  ---
+  duration_ms: 1.075873
+  type: 'test'
+  ...
+# Subtest: preview page uses a self-contained relative stylesheet path
+ok 10 - preview page uses a self-contained relative stylesheet path
+  ---
+  duration_ms: 0.310206
+  type: 'test'
+  ...
+# Subtest: order status page does not render HTML through escaped text
+ok 11 - order status page does not render HTML through escaped text
+  ---
+  duration_ms: 0.428608
+  type: 'test'
+  ...
+# Subtest: manager account has a direct manager and security entry point
+ok 12 - manager account has a direct manager and security entry point
+  ---
+  duration_ms: 0.269311
+  type: 'test'
+  ...
+# Subtest: coupon expiry uses the configured store timezone instead of the Node host timezone
+ok 13 - coupon expiry uses the configured store timezone instead of the Node host timezone
+  ---
+  duration_ms: 0.180078
+  type: 'test'
+  ...
+# Subtest: mobile navigation has both the JS toggle and the CSS open-state
+ok 14 - mobile navigation has both the JS toggle and the CSS open-state
+  ---
+  duration_ms: 0.83692
+  type: 'test'
+  ...
+# Subtest: checkout cancellation only immediately releases a pending reservation when no external payment session exists
+ok 15 - checkout cancellation only immediately releases a pending reservation when no external payment session exists
+  ---
+  duration_ms: 0.471842
+  type: 'test'
+  ...
+# Subtest: dynamic mobile bottom navigation is excluded from checkout
+ok 16 - dynamic mobile bottom navigation is excluded from checkout
+  ---
+  duration_ms: 1.683708
+  type: 'test'
+  ...
+# Subtest: frontend asset versions are consistent across the main shell and preview
+ok 17 - frontend asset versions are consistent across the main shell and preview
+  ---
+  duration_ms: 0.318523
+  type: 'test'
+  ...
+# Subtest: all storefront date displays use the configured store timezone helper
+ok 18 - all storefront date displays use the configured store timezone helper
+  ---
+  duration_ms: 0.154796
+  type: 'test'
+  ...
+# Subtest: main shell provides a keyboard skip link and a stable main content target
+ok 19 - main shell provides a keyboard skip link and a stable main content target
+  ---
+  duration_ms: 0.092062
+  type: 'test'
+  ...
+# Subtest: manager navigation is semantic and marks the current section
+ok 20 - manager navigation is semantic and marks the current section
+  ---
+  duration_ms: 0.954576
+  type: 'test'
+  ...
+# Subtest: product pages expose a breadcrumb trail for navigation context
+ok 21 - product pages expose a breadcrumb trail for navigation context
+  ---
+  duration_ms: 0.12103
+  type: 'test'
+  ...
+# Subtest: production audit uses store timezone-aware date helpers and positive product pricing
+ok 22 - production audit uses store timezone-aware date helpers and positive product pricing
+  ---
+  duration_ms: 0.169206
+  type: 'test'
+  ...
+# Subtest: automatic discount is persisted and controlled per product
+ok 23 - automatic discount is persisted and controlled per product
+  ---
+  duration_ms: 0.151588
+  type: 'test'
+  ...
+# Subtest: automatic item discounts are recorded separately and coupons never discount above the already reduced item subtotal
+ok 24 - automatic item discounts are recorded separately and coupons never discount above the already reduced item subtotal
+  ---
+  duration_ms: 0.130894
+  type: 'test'
+  ...
+# Subtest: cart and checkout expose per-product automatic discounts transparently
+ok 25 - cart and checkout expose per-product automatic discounts transparently
+  ---
+  duration_ms: 0.090571
+  type: 'test'
+  ...
+# Subtest: automatic discount keeps product price ordering monotonic and uses the same server helper
+ok 26 - automatic discount keeps product price ordering monotonic and uses the same server helper
+  ---
+  duration_ms: 0.340773
+  type: 'test'
+  ...
+# Subtest: canonical orders schema contains the automatic discount column and products contain the per-item discount control
+ok 27 - canonical orders schema contains the automatic discount column and products contain the per-item discount control
+  ---
+  duration_ms: 0.14811
+  type: 'test'
+  ...
+# Subtest: store settings no longer expose a storewide discount and product prices sort using the final per-item price
+ok 28 - store settings no longer expose a storewide discount and product prices sort using the final per-item price
+  ---
+  duration_ms: 0.209516
+  type: 'test'
+  ...
+# Subtest: product discount migration preserves the old storewide setting only once while moving future control to products
+ok 29 - product discount migration preserves the old storewide setting only once while moving future control to products
+  ---
+  duration_ms: 0.222819
+  type: 'test'
+  ...
+# Subtest: per-product discount is isolated: setting one product never creates a store-wide control
+ok 30 - per-product discount is isolated: setting one product never creates a store-wide control
+  ---
+  duration_ms: 0.35261
+  type: 'test'
+  ...
+# Subtest: live checkout is blocked until payment and required business identity/policies are configured
+ok 31 - live checkout is blocked until payment and required business identity/policies are configured
+  ---
+  duration_ms: 0.23261
+  type: 'test'
+  ...
+# Subtest: production launch gate requires transactional email, tax-inclusive prices and a sellable product
+ok 32 - production launch gate requires transactional email, tax-inclusive prices and a sellable product
+  ---
+  duration_ms: 0.149925
+  type: 'test'
+  ...
+# Subtest: checkout cancellation never immediately cancels an order that already has an external payment session
+ok 33 - checkout cancellation never immediately cancels an order that already has an external payment session
+  ---
+  duration_ms: 0.301364
+  type: 'test'
+  ...
+# Subtest: expired checkout idempotency orders are cancelled before the same token can create a fresh order
+ok 34 - expired checkout idempotency orders are cancelled before the same token can create a fresh order
+  ---
+  duration_ms: 0.229078
+  type: 'test'
+  ...
+# Subtest: retrying an existing pending checkout cannot redirect to an unlinked newly-created payment session
+ok 35 - retrying an existing pending checkout cannot redirect to an unlinked newly-created payment session
+  ---
+  duration_ms: 0.131664
+  type: 'test'
+  ...
+# Subtest: paid webhook only sends confirmations for paid-like order states
+ok 36 - paid webhook only sends confirmations for paid-like order states
+  ---
+  duration_ms: 0.117418
+  type: 'test'
+  ...
+# Subtest: admin audit navigation marks Audit instead of Stories
+ok 37 - admin audit navigation marks Audit instead of Stories
+  ---
+  duration_ms: 0.184932
+  type: 'test'
+  ...
+# Subtest: product preview currency is not hard-coded to euro
+ok 38 - product preview currency is not hard-coded to euro
+  ---
+  duration_ms: 0.15176
+  type: 'test'
+  ...
+# Subtest: product and story images reserve layout space for lower CLS
+ok 39 - product and story images reserve layout space for lower CLS
+  ---
+  duration_ms: 0.349117
+  type: 'test'
+  ...
+# Subtest: order detail names automatic product discounts explicitly
+ok 40 - order detail names automatic product discounts explicitly
+  ---
+  duration_ms: 0.078663
+  type: 'test'
+  ...
+# Subtest: database startup declares the settings upsert before any migration can use it
+ok 41 - database startup declares the settings upsert before any migration can use it
+  ---
+  duration_ms: 0.458271
+  type: 'test'
+  ...
+# Subtest: homepage hero uses real catalog data instead of a fixed demo product
+ok 42 - homepage hero uses real catalog data instead of a fixed demo product
+  ---
+  duration_ms: 0.144267
+  type: 'test'
+  ...
+# Subtest: manager currency is selected from the server allow-list
+ok 43 - manager currency is selected from the server allow-list
+  ---
+  duration_ms: 0.199725
+  type: 'test'
+  ...
+# Subtest: product forms always receive the configured display currency
+ok 44 - product forms always receive the configured display currency
+  ---
+  duration_ms: 0.140985
+  type: 'test'
+  ...
+# Subtest: email sender validation rejects malformed mailbox syntax
+ok 45 - email sender validation rejects malformed mailbox syntax
+  ---
+  duration_ms: 0.357364
+  type: 'test'
+  ...
+# Subtest: configured currency allow-list excludes zero-decimal HUF and has explicit Stripe minimum checks
+ok 46 - configured currency allow-list excludes zero-decimal HUF and has explicit Stripe minimum checks
+  ---
+  duration_ms: 0.116199
+  type: 'test'
+  ...
+# Subtest: homepage always has a catalog fallback when no product is marked featured
+ok 47 - homepage always has a catalog fallback when no product is marked featured
+  ---
+  duration_ms: 0.089933
+  type: 'test'
+  ...
+# Subtest: moneyCents handles euro-style input safely
+ok 48 - moneyCents handles euro-style input safely
+  ---
+  duration_ms: 1.142248
+  type: 'test'
+  ...
+# Subtest: URL validation blocks protocol-relative, javascript and insecure URLs
+ok 49 - URL validation blocks protocol-relative, javascript and insecure URLs
+  ---
+  duration_ms: 0.386749
+  type: 'test'
+  ...
+# Subtest: upload signatures match their declared MIME type
+ok 50 - upload signatures match their declared MIME type
+  ---
+  duration_ms: 0.253036
+  type: 'test'
+  ...
+# Subtest: password and checkout country policy helpers are explicit
+ok 51 - password and checkout country policy helpers are explicit
+  ---
+  duration_ms: 0.154232
+  type: 'test'
+  ...
+# Subtest: Stripe signatures reject tampering and stale timestamps
+ok 52 - Stripe signatures reject tampering and stale timestamps
+  ---
+  duration_ms: 0.794695
+  type: 'test'
+  ...
+# Subtest: AI feature stays optional and disabled without provider configuration
+ok 53 - AI feature stays optional and disabled without provider configuration
+  ---
+  duration_ms: 0.342059
+  type: 'test'
+  ...
+# Subtest: Stripe is never enabled with a non-HTTPS production base URL
+ok 54 - Stripe is never enabled with a non-HTTPS production base URL
+  ---
+  duration_ms: 0.351248
+  type: 'test'
+  ...
+# Subtest: currency validation rejects malformed or unsupported display currencies
+ok 55 - currency validation rejects malformed or unsupported display currencies
+  ---
+  duration_ms: 15.39429
+  type: 'test'
+  ...
+# Subtest: Stripe checkout uses deterministic idempotency and preserves ambiguous network errors
+ok 56 - Stripe checkout uses deterministic idempotency and preserves ambiguous network errors
+  ---
+  duration_ms: 3.641728
+  type: 'test'
+  ...
+# Subtest: store timezone conversion round-trips across standard and daylight time
+ok 57 - store timezone conversion round-trips across standard and daylight time
+  ---
+  duration_ms: 7.543503
+  type: 'test'
+  ...
+1..57
+# tests 57
+# suites 0
+# pass 57
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 369.765395
+
+> universal-shop@2.5.0 audit:static
+> node scripts/static-audit.mjs
+
+Static audit passed: 38 source/config files inspected.
+Template audit passed: 28 EJS templates inspected.

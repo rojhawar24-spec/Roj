@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="<%= storeName %> — simple shopping, clear prices and secure checkout.">
+  <meta property="og:title" content="<%= title ? title + ' · ' + storeName : storeName %>">
+  <meta property="og:description" content="Simple shopping, clear prices and secure checkout.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <meta name="csrf-token" content="<%= csrf %>">
+  <meta name="theme-color" content="#101828">
+  <meta name="color-scheme" content="light">
+  <title><%= title ? title + ' · ' + storeName : storeName %></title>
+  <link rel="stylesheet" href="/css/style.css?v=2.5.0">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<div class="announcement"><div class="container announcement-inner"><span>Secure checkout</span><span>•</span><span>Clear pricing</span><span>•</span><span>English</span><span class="language-pill">EN</span></div></div>
+<header class="site-header">
+  <div class="container nav-row">
+    <a class="brand" href="/" aria-label="<%= storeName %> home"><img class="brand-logo" src="/assets/logo.svg" alt="" width="38" height="38"><span class="brand-word"><%= storeName %></span></a>
+    <div class="search-box" data-search-box>
+      <form class="search" action="/shop" method="get" role="search">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input data-search-input name="search" autocomplete="off" aria-label="Search products" placeholder="Search products…" value="<%= typeof search !== 'undefined' ? search : '' %>">
+        <button type="submit" aria-label="Search">→</button>
+      </form>
+      <div class="search-results" data-search-results hidden></div>
+    </div>
+    <nav class="nav-links" data-nav aria-label="Primary navigation" id="site-navigation">
+      <a href="/shop">Shop</a><a href="/stories">Stories</a>
+      <% if (isLoggedIn) { %><a href="/wishlist">Saved <b data-wishlist-count><%= wishlistCount %></b></a><a href="/account">Account</a><% } else { %><a href="/login">Sign in</a><% } %>
+      <a class="cart-nav" href="/cart" aria-label="Cart">Bag <b><%= cartCount %></b></a>
+      <% if (user && ['admin','manager'].includes(user.role)) { %><a class="admin-link" href="/admin">Manage</a><% } %>
+      <% if (isLoggedIn) { %><form class="inline-form nav-logout" method="post" action="/logout"><input type="hidden" name="_csrf" value="<%= csrf %>"><button type="submit">Log out</button></form><% } %>
+    </nav>
+    <button class="menu-toggle" data-menu-toggle aria-expanded="false" aria-controls="site-navigation" aria-label="Open navigation">☰</button>
+  </div>
+  <div class="container mobile-search" data-search-box>
+    <form class="search" action="/shop" method="get" role="search">
+      <span class="search-icon" aria-hidden="true">⌕</span>
+      <input data-search-input name="search" autocomplete="off" aria-label="Search products" placeholder="Search products…" value="<%= typeof search !== 'undefined' ? search : '' %>">
+      <button type="submit" aria-label="Search">→</button>
+    </form>
+    <div class="search-results" data-search-results hidden></div>
+  </div>
+</header>
+<main id="main-content">

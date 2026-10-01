@@ -1,0 +1,29 @@
+<%- include('partials/header',{title:'Home'}) %>
+<section class="hero container">
+  <div class="hero-copy">
+    <span class="eyebrow">SMART SHOPPING · LESS FRICTION</span>
+    <h1>Find the good stuff. <em>Skip the noise.</em></h1>
+    <p class="hero-text">A polished storefront built around useful products, honest pricing, fast discovery and a checkout that verifies the important details on the server.</p>
+    <div class="hero-actions"><a class="btn btn-mint" href="/shop">Shop now <span>→</span></a><a class="text-link" href="#featured">See featured ↘</a></div>
+    <div class="hero-micro"><span>✓ Server-verified pricing</span><span>✓ Secure session</span><span>✓ Simple returns info</span></div>
+  </div>
+  <div class="hero-stage">
+    <% const heroProduct = products?.[0]; %>
+    <div class="stage-top"><span><%= heroProduct?.featured ? 'FEATURED PRODUCT' : 'SHOP HIGHLIGHT' %></span><span>01 / <%= Math.max(1, Math.min(products?.length || 1, 4)) %></span></div>
+    <% if (heroProduct) { %>
+      <div class="stage-product"><div class="stage-image"><img src="<%= safeImageUrl(heroProduct.image_url) %>" alt="<%= heroProduct.name %>" width="800" height="1000" fetchpriority="high" decoding="async"></div><div class="stage-copy"><span class="mini-badge"><%= app.locals.discountPercent(heroProduct)>0 ? '-' + app.locals.discountPercent(heroProduct) + '%' : 'FEATURED' %></span><h2><%= heroProduct.name %></h2><p><%= heroProduct.short_description %></p><a href="/product/<%= heroProduct.slug %>" class="stage-link">View product →</a></div></div>
+    <% } %>
+    <div class="stage-glow"></div><div class="stage-grid"></div>
+  </div>
+</section>
+<% if (categories && categories.length) { %>
+<section class="container section-tight"><div class="section-head"><div><span class="eyebrow">BROWSE FAST</span><h2>Shop by category</h2></div><a class="text-link" href="/shop">View all →</a></div><div class="category-grid"><% categories.slice(0,6).forEach((c,index)=>{ %><a class="category-card category-<%= index+1 %>" href="/shop?category=<%= encodeURIComponent(c.slug) %>"><span class="category-index">0<%= index+1 %></span><strong><%= c.name %></strong><span>Explore →</span></a><% }) %></div></section>
+<% } %>
+<% if (stories.length) { %>
+<section class="container section stories-section"><div class="section-head"><div><span class="eyebrow">LIVE NOW</span><h2>Stories</h2></div><a class="text-link" href="/stories">View all →</a></div><div class="stories-row"> <% stories.slice(0,8).forEach(s=>{ %><a class="story-bubble" href="<%= s.product_slug ? '/product/'+s.product_slug : safeStoryHref(s.link_url) %>"><div class="story-ring"><img src="<%= safeImageUrl(s.image_url,'/assets/story.svg') %>" alt="" width="160" height="160" loading="lazy" decoding="async"><span>↗</span></div><strong><%= s.title %></strong></a><% }) %></div></section>
+<% } %>
+<section class="container trust-row"><div><span class="trust-icon">↗</span><strong>Easy discovery</strong><span>Clean search, categories and product pages.</span></div><div><span class="trust-icon">✓</span><strong>Secure checkout</strong><span>Important totals are recalculated server-side.</span></div><div><span class="trust-icon">◎</span><strong>Simple accounts</strong><span>Order history stays protected.</span></div><div><span class="trust-icon">↺</span><strong>Clear policies</strong><span>Shipping and returns are easy to find.</span></div></section>
+<section id="featured" class="container section"><div class="section-head"><div><span class="eyebrow">CURATED</span><h2>Featured products</h2></div><a class="text-link" href="/shop">All products →</a></div><div class="product-grid"> <% products.forEach(p=>{ %><article class="product-card"><a href="/product/<%= p.slug %>" class="product-image"><img src="<%= safeImageUrl(p.image_url) %>" alt="<%= p.name %>" width="800" height="1000" loading="lazy" decoding="async"><% if(app.locals.discountPercent(p)>0){ %><span class="badge sale">-<%= app.locals.discountPercent(p) %>%</span><% } %><% if(p.available_stock<=0){ %><span class="badge out">Sold out</span><% } %></a><div class="product-meta"><div><span class="muted"><%= p.category_name || 'Collection' %></span><h3><a href="/product/<%= p.slug %>"><%= p.name %></a></h3><p><%= p.short_description %></p></div><div class="price"><strong><%= formatPrice(app.locals.effectivePrice(p),currency) %></strong><% if(app.locals.effectivePrice(p)<p.price_cents){ %><del><%= formatPrice(p.price_cents,currency) %></del><% } %></div></div><form method="post" action="/cart/add" class="card-buy"><input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="productId" value="<%= p.id %>"><input type="hidden" name="quantity" value="1"><button class="btn btn-dark btn-small" <%= p.available_stock<=0?'disabled':'' %>><%= p.available_stock>0?'Add to bag':'Sold out' %></button></form></article><% }) %></div></section>
+<section class="container section split-banner"><div><span class="eyebrow">MADE FOR REAL STORES</span><h2>One calm storefront.<br>Everything behind it.</h2><p>Manage products, prices, stock, stories, discounts, orders and customers from a single control room.</p></div><a class="btn btn-light" href="/shop">Explore the shop</a></section>
+<% if (aiEnabled) { %><section class="container section ai-card"><div><span class="eyebrow">OPTIONAL AI</span><h2>A little help choosing?</h2><p>The assistant can answer short product questions using only the catalog context supplied by the server.</p></div><div class="ai-form"><label for="ai-input">Your question</label><div class="ai-input-row"><input id="ai-input" maxlength="500" placeholder="What works well for daily travel?"><button class="btn btn-dark" data-ai-ask>Ask</button></div><div id="ai-answer" class="ai-answer" aria-live="polite"></div></div></section><% } %>
+<%- include('partials/footer') %>

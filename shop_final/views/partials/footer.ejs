@@ -1,0 +1,11 @@
+</main>
+<footer class="site-footer"><div class="container footer-grid"><div class="footer-brand"><strong><%= storeName %></strong><p>Clear products. Simple shopping. Secure checkout.</p><% if(supportEmail){ %><a href="mailto:<%= supportEmail %>" class="text-link"><%= supportEmail %></a><% } %><% if(businessPhone){ %><a href="tel:<%= encodeURIComponent(businessPhone) %>" class="text-link"><%= businessPhone %></a><% } %><% if(enterpriseNumber){ %><span class="muted">Registration: <%= enterpriseNumber %></span><% } %><% if(legalName||businessAddress){ %><span class="muted"><%= legalName %><%= legalName&&businessAddress?' · ':'' %><%= businessAddress %></span><% } %></div><div><span class="footer-title">Shop</span><a href="/shop">All products</a><a href="/stories">Stories</a><a href="/wishlist">Wishlist</a><a href="/cart">Cart</a></div><div><span class="footer-title">Information</span><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/shipping-returns">Shipping & returns</a><a href="/account">Account</a></div></div><div class="container footer-bottom"><span>© <%= new Date().getFullYear() %> <%= storeName %></span><span>Prices, stock and discounts are verified by the server.</span><span class="language-pill footer-language">EN</span></div></footer>
+<% if(!isAdminRoute && !isCheckoutRoute){ %><nav class="mobile-bottom-nav" aria-label="Mobile navigation">
+  <a href="/" class="<%= path==='/'?'active':'' %>"><span>⌂</span>Home</a>
+  <a href="/shop" class="<%= path.startsWith('/shop')?'active':'' %>"><span>⌕</span>Shop</a>
+  <% if(isLoggedIn){ %><a href="/wishlist" class="<%= path.startsWith('/wishlist')?'active':'' %>"><span>♥</span>Saved <b data-wishlist-count><%= wishlistCount %></b></a><% } else { %><a href="/login"><span>♥</span>Saved</a><% } %>
+  <a href="/cart" class="<%= path.startsWith('/cart')?'active':'' %>"><span>Bag <b><%= cartCount %></b></span>Cart</a>
+  <a href="<%= isLoggedIn?'/account':'/login' %>" class="<%= path.startsWith('/account')||path.startsWith('/login')?'active':'' %>"><span>◌</span>Account</a>
+</nav><% } %>
+<script src="/js/app.js?v=2.5.0" defer></script>
+</body></html>

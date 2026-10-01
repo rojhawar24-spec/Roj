@@ -1,0 +1,18 @@
+<%- include('partials/header',{title:'Wishlist'}) %>
+<section class="container page-head"><span class="eyebrow">SAVED FOR LATER</span><h1>Your wishlist</h1><p>Keep products you like in one place and add them to your bag whenever you're ready.</p></section>
+<section class="container section">
+  <% if(!products.length){ %>
+    <div class="empty"><span class="empty-icon">♡</span><h2>Your wishlist is empty.</h2><p>Save products from the shop to find them here later.</p><a class="btn btn-dark" href="/shop">Browse products</a></div>
+  <% } else { %>
+    <div class="product-grid">
+      <% products.forEach(p=>{ %>
+        <article class="product-card">
+          <a href="/product/<%= p.slug %>" class="product-image"><img src="<%= safeImageUrl(p.image_url) %>" alt="<%= p.name %>" width="800" height="1000" loading="lazy" decoding="async"><% if(app.locals.discountPercent(p)>0){ %><span class="badge sale">-<%= app.locals.discountPercent(p) %>%</span><% } %></a>
+          <div class="product-meta"><div><span class="muted"><%= p.category_name || 'Collection' %></span><h3><a href="/product/<%= p.slug %>"><%= p.name %></a></h3></div><div class="price"><strong><%= formatPrice(app.locals.effectivePrice(p),currency) %></strong><% if(app.locals.effectivePrice(p)<p.price_cents){ %><del><%= formatPrice(p.price_cents,currency) %></del><% } %></div></div>
+          <div class="card-actions"><form method="post" action="/cart/add" class="card-buy"><input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="productId" value="<%= p.id %>"><input type="hidden" name="quantity" value="1"><button class="btn btn-dark btn-small" <%= p.available_stock<=0?'disabled':'' %>><%= p.available_stock>0?'Add to bag':'Sold out' %></button></form><button class="icon-btn wishlist-toggle saved" data-wishlist-toggle data-product-id="<%= p.id %>" data-product-name="<%= p.name %>" aria-label="Remove <%= p.name %> from wishlist" aria-pressed="true">♥</button></div>
+        </article>
+      <% }) %>
+    </div>
+  <% } %>
+</section>
+<%- include('partials/footer') %>

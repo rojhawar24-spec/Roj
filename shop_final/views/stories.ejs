@@ -1,0 +1,5 @@
+<%- include('partials/header',{title:'Stories'}) %>
+<section class="container page-head"><span class="eyebrow">LIVE NOW</span><h1>Stories</h1><p>Short updates, launches and limited moments from the store.</p></section>
+<section class="container section story-grid"><% stories.forEach(s=>{ %><article class="story-card"><img src="<%= safeImageUrl(s.image_url,'/assets/story.svg') %>" alt="" width="800" height="600" loading="lazy" decoding="async"><div class="story-card-body"><span class="muted"><%= formatDateTimeDisplay(s.expires_at,storeTimeZone).split(',')[0] %></span><h2><%= s.title %></h2><p><%= s.body %></p><a class="text-link" href="<%= s.product_slug ? '/product/'+s.product_slug : safeStoryHref(s.link_url) %>">Explore →</a></div></article><% }) %></section>
+<% if(!stories.length){ %><div class="container empty"><h2>No active stories.</h2><a class="btn btn-dark" href="/shop">Browse products</a></div><% } %>
+<%- include('partials/footer') %>

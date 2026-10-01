@@ -1,0 +1,4 @@
+
+> universal-shop@2.5.0 check
+> node --check src/server.js && node --check src/db.js && node --check src/auth.js && node --check src/security.js && node --check src/services/payment.js && node --check src/services/ai.js && node --check scripts/load-test.mjs && node --check scripts/static-audit.mjs && node --check test/security.test.js && node --check test/sale-readiness.test.js && node --check scripts/template-audit.mjs
+
