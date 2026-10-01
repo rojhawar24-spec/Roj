@@ -5,6 +5,9 @@ import test from 'node:test';
 
 process.env.SHOP_DATABASE_URL = ':memory:';
 process.env.NODE_ENV = 'test';
+process.env.VERCEL = '1';
+process.env.TURSO_DATABASE_URL = ':memory:';
+process.env.TURSO_AUTH_TOKEN = 'test-only-token';
 process.env.ADMIN_EMAIL = 'manager-smoke@example.test';
 process.env.ADMIN_PASSWORD = `Smoke-${crypto.randomBytes(24).toString('hex')}-Safe`;
 process.env.BASE_URL = 'https://shop.example.test';
@@ -24,6 +27,14 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
 
   const base = `http://127.0.0.1:${server.address().port}`;
+  const forwardedLogin = await fetch(`${base}/login`, {
+    headers: {
+      Forwarded: 'for=203.0.113.8;proto=https;host=roj-shop.vercel.app',
+      'x-forwarded-for': '203.0.113.8'
+    }
+  });
+  assert.equal(forwardedLogin.status, 200);
+
   const anonymousDashboard = await fetch(`${base}/admin`, { redirect: 'manual' });
   assert.equal(anonymousDashboard.status, 302);
   assert.equal(anonymousDashboard.headers.get('location'), '/login?next=%2Fadmin');

@@ -28,7 +28,7 @@ app.set('views',path.join(root,'views'));
 app.disable('x-powered-by');
 
 const isProd = process.env.NODE_ENV === 'production';
-const trustProxy = Number(process.env.TRUST_PROXY || 0);
+const trustProxy = Number(process.env.TRUST_PROXY ?? (process.env.VERCEL === '1' ? '1' : '0'));
 app.set('trust proxy', Number.isInteger(trustProxy) && trustProxy >= 0 ? trustProxy : false);
 app.use(helmet({
   contentSecurityPolicy: {
