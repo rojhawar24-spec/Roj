@@ -8,7 +8,7 @@ import { normalizeProductDiscountPercent, applyPercentDiscountCents } from './pr
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, '..');
-const dataDir = path.join(root, 'data');
+const dataDir = process.env.VERCEL === '1' ? '/tmp/universal-shop-data' : path.join(root, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 
 const db = new Database(path.join(dataDir, 'shop.db'));
