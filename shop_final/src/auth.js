@@ -5,12 +5,25 @@ function scryptVerify(password,stored) { try { const [algo,n,r,p,saltB64,hashB64
 export function hashPassword(password) { return scryptHash(password); }
 export function verifyPassword(password,stored) { return scryptVerify(password,stored); }
 export function sessionCookieName() { return process.env.NODE_ENV==='production' ? '__Host-sid' : 'sid'; }
-export function attachAuth(req,res,next) { let sid=req.cookies?.[sessionCookieName()]; let session=getSession(sid); if(!session){ sid=createSession(); session=getSession(sid); res.cookie(sessionCookieName(),sid,cookieOptions()); } if(!session.csrf){session.csrf=crypto.randomBytes(24).toString('base64url'); setSessionCsrf(sid,session.csrf);} req.sessionId=sid; req.session=session; req.user=session.user_id?getUserById(session.user_id):null; res.locals.user=req.user; res.locals.isLoggedIn=Boolean(req.user); next(); }
+export async function attachAuth(req,res,next) {
+  try {
+    let sid=req.cookies?.[sessionCookieName()];
+    let session=await getSession(sid);
+    if(!session){ sid=await createSession(); session=await getSession(sid); res.cookie(sessionCookieName(),sid,cookieOptions()); }
+    if(!session.csrf){session.csrf=crypto.randomBytes(24).toString('base64url'); await setSessionCsrf(sid,session.csrf);}
+    req.sessionId=sid;
+    req.session=session;
+    req.user=session.user_id?await getUserById(session.user_id):null;
+    res.locals.user=req.user;
+    res.locals.isLoggedIn=Boolean(req.user);
+    next();
+  } catch(error) { next(error); }
+}
 export function cookieOptions() { return {httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:1000*60*60*24*14}; }
-export function login(req,res,userId) { const oldSession=req.session; const newSid=createSession(userId); setSessionUser(newSid,userId); setSessionCsrf(newSid,crypto.randomBytes(24).toString('base64url')); saveSessionCart(newSid,oldSession?.cart||[]);
-  saveSessionWishlist(newSid,oldSession?.wishlist||[]); saveSessionCoupon(newSid,oldSession?.coupon||null); destroySession(req.sessionId); res.cookie(sessionCookieName(),newSid,cookieOptions()); }
-export function logout(req,res) { destroySession(req.sessionId); res.clearCookie(sessionCookieName(),{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/'}); }
+export async function login(req,res,userId) { const oldSession=req.session; const newSid=await createSession(userId); await setSessionUser(newSid,userId); await setSessionCsrf(newSid,crypto.randomBytes(24).toString('base64url')); await saveSessionCart(newSid,oldSession?.cart||[]);
+  await saveSessionWishlist(newSid,oldSession?.wishlist||[]); await saveSessionCoupon(newSid,oldSession?.coupon||null); await destroySession(req.sessionId); res.cookie(sessionCookieName(),newSid,cookieOptions()); }
+export async function logout(req,res) { await destroySession(req.sessionId); res.clearCookie(sessionCookieName(),{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/'}); }
 export function requireAuth(req,res,next) { if(!req.user) return res.redirect('/login?next='+encodeURIComponent(req.originalUrl)); next(); }
-export function requireManager(req,res,next) { if(!req.user || !['manager','admin'].includes(req.user.role)) return res.status(403).render('error',{title:'Access denied',message:'You do not have permission to open this page.'}); next(); }
+export function requireManager(req,res,next) { if(!req.user) return res.redirect('/login?next='+encodeURIComponent(req.originalUrl)); if(!['manager','admin'].includes(req.user.role)) return res.status(403).render('error',{title:'Access denied',message:'You do not have permission to open this page.'}); next(); }
 const DUMMY_HASH=scryptHash('dummy-login-password-not-used');
-export function authenticate(email,password) { const row=getUserAuthByEmail(String(email||'').trim().toLowerCase()); const valid=verifyPassword(String(password||''),row?.password_hash || DUMMY_HASH); if(!row||!valid) return null; return {id:row.id,email:row.email,role:row.role}; }
+export async function authenticate(email,password) { const row=await getUserAuthByEmail(String(email||'').trim().toLowerCase()); const valid=verifyPassword(String(password||''),row?.password_hash || DUMMY_HASH); if(!row||!valid) return null; return {id:row.id,email:row.email,role:row.role}; }

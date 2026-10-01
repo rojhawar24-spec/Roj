@@ -46,13 +46,13 @@ test('layout has one main region and no inline styles under the strict CSP', () 
 
 test('database schema block contains only SQL and customer_phone migration runs outside it', () => {
   const source = read('src/db.js');
-  const start = source.indexOf('db.exec(`');
+  const start = source.indexOf('executeMultiple(`');
   const end = source.indexOf('`);', start);
   assert.ok(start >= 0 && end > start);
   const schema = source.slice(start + 9, end);
   assert.equal(/(^|\n)\s*(const|if)\s+orderColumns\b/.test(schema), false);
   assert.equal(schema.includes('// Backward-compatible migration'), false);
-  assert.match(source.slice(end), /const orderColumns = db\.prepare\("PRAGMA table_info\(orders\)"\)/);
+  assert.match(source.slice(end), /const orderColumns = \(await getRows\('PRAGMA table_info\(orders\)'\)\)/);
 });
 
 test('preview page uses a self-contained relative stylesheet path', () => {
@@ -90,7 +90,7 @@ test('mobile navigation has both the JS toggle and the CSS open-state', () => {
 
 test('checkout cancellation only immediately releases a pending reservation when no external payment session exists', () => {
   const server = read('src/server.js');
-  assert.match(server, /if\(order\.status==='pending' && !order\.payment_reference\) cancelPendingOrder\(order\.id\)/);
+  assert.match(server, /if\(order\.status==='pending' && !order\.payment_reference\) await cancelPendingOrder\(order\.id\)/);
 });
 
 test('dynamic mobile bottom navigation is excluded from checkout', () => {
@@ -265,12 +265,12 @@ test('checkout cancellation never immediately cancels an order that already has 
 test('expired checkout idempotency orders are cancelled before the same token can create a fresh order', () => {
   const server = read('src/server.js');
   assert.match(server, /const reservationExpired=prior\.status==='pending' && prior\.reservation_expires_at/);
-  assert.match(server, /if\(reservationExpired\)\{\s*cancelPendingOrder\(prior\.id\);\s*prior=null;/);
+  assert.match(server, /if\(reservationExpired\)\{\s*await cancelPendingOrder\(prior\.id\);\s*prior=null;/);
 });
 
 test('retrying an existing pending checkout cannot redirect to an unlinked newly-created payment session', () => {
   const server = read('src/server.js');
-  assert.match(server, /if\(!saveCheckoutSession\(existing\.id,checkout\.id,checkout\.url\)\)/);
+  assert.match(server, /if\(!await saveCheckoutSession\(existing\.id,checkout\.id,checkout\.url\)\)/);
   assert.match(server, /fresh\?\.status==='pending' && fresh\.payment_url/);
 });
 
@@ -310,10 +310,10 @@ test('order detail names automatic product discounts explicitly', () => {
 
 test('database startup declares the settings upsert before any migration can use it', () => {
   const db = read('src/db.js');
-  const declaration = db.indexOf("const upsertSetting = db.prepare('INSERT INTO settings");
+  const declaration = db.indexOf("const upsertSetting = (key,value) => run('INSERT INTO settings");
   assert.ok(declaration > 0);
-  assert.ok(db.indexOf('upsertSetting.run', declaration + 1) > declaration);
-  const migrationUse = db.indexOf("upsertSetting.run('prices_include_tax'", 0);
+  assert.ok(db.indexOf('await upsertSetting', declaration + 1) > declaration);
+  const migrationUse = db.indexOf("await upsertSetting('prices_include_tax'", 0);
   assert.ok(migrationUse > declaration);
 });
 
@@ -336,7 +336,7 @@ test('manager currency is selected from the server allow-list', () => {
 
 test('product forms always receive the configured display currency', () => {
   const server = read('src/server.js');
-  assert.match(server, /admin\/product-form'.*currency:getSetting\('currency','EUR'\)/);
+  assert.match(server, /admin\/product-form'.*currency:await getSetting\('currency','EUR'\)/);
 });
 
 test('email sender validation rejects malformed mailbox syntax', async () => {
@@ -361,6 +361,6 @@ test('configured currency allow-list excludes zero-decimal HUF and has explicit 
 
 test('homepage always has a catalog fallback when no product is marked featured', () => {
   const server = read('src/server.js');
-  assert.match(server, /const featuredProducts=listProducts/);
-  assert.match(server, /const products=featuredProducts\.length \? featuredProducts : listProducts/);
+  assert.match(server, /const featuredProducts=await listProducts/);
+  assert.match(server, /const products=featuredProducts\.length \? featuredProducts : await listProducts/);
 });

@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-const root=path.resolve(new URL('..',import.meta.url).pathname);
+import { fileURLToPath } from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const files=[];
 function walk(dir){ for(const name of fs.readdirSync(dir)){ const p=path.join(dir,name),st=fs.statSync(p); if(st.isDirectory()) walk(p); else if(name.endsWith('.ejs')) files.push(p); } }
 walk(path.join(root,'views'));

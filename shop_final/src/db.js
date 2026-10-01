@@ -1,22 +1,10 @@
-import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { db, execute, executeMultiple, getRow, getRows, run } from './database.js';
 import { normalizeProductDiscountPercent, applyPercentDiscountCents } from './pricing.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const root = path.resolve(__dirname, '..');
-const dataDir = process.env.VERCEL === '1' ? '/tmp/universal-shop-data' : path.join(root, 'data');
-fs.mkdirSync(dataDir, { recursive: true });
+await execute('PRAGMA foreign_keys = ON');
 
-const db = new Database(path.join(dataDir, 'shop.db'));
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-db.pragma('busy_timeout = 5000');
-
-db.exec(`
+await executeMultiple(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -159,13 +147,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 
 // Settings writer must exist before startup migrations use it. Keep this declaration
 // immediately after schema creation to avoid a temporal-dead-zone failure at startup.
-const upsertSetting = db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
+const upsertSetting = (key,value) => run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[key,value]);
 
 // Backward-compatible migrations for fields added after the original checkout schema.
-const orderColumns = db.prepare("PRAGMA table_info(orders)").all().map(r => r.name);
-if (!orderColumns.includes('customer_phone')) db.exec("ALTER TABLE orders ADD COLUMN customer_phone TEXT NOT NULL DEFAULT ''");
-if (!orderColumns.includes('automatic_discount_cents')) db.exec("ALTER TABLE orders ADD COLUMN automatic_discount_cents INTEGER NOT NULL DEFAULT 0");
-if (!orderColumns.includes('confirmation_email_sent_at')) db.exec("ALTER TABLE orders ADD COLUMN confirmation_email_sent_at TEXT");
+const orderColumns = (await getRows('PRAGMA table_info(orders)')).map(r => r.name);
+if (!orderColumns.includes('customer_phone')) await execute("ALTER TABLE orders ADD COLUMN customer_phone TEXT NOT NULL DEFAULT ''");
+if (!orderColumns.includes('automatic_discount_cents')) await execute("ALTER TABLE orders ADD COLUMN automatic_discount_cents INTEGER NOT NULL DEFAULT 0");
+if (!orderColumns.includes('confirmation_email_sent_at')) await execute("ALTER TABLE orders ADD COLUMN confirmation_email_sent_at TEXT");
 
 // Small forward-only migrations for databases created by earlier versions.
 // Only skip a migration when the target column already exists; real SQL errors are allowed to fail loudly.
@@ -183,56 +171,55 @@ const forwardMigrations = [
   { table:'products', column:'automatic_discount_percent', sql:'ALTER TABLE products ADD COLUMN automatic_discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(automatic_discount_percent >= 0 AND automatic_discount_percent <= 90)' }
 ];
 for (const migration of forwardMigrations) {
-  const columns = db.prepare(`PRAGMA table_info(${migration.table})`).all();
-  if (!columns.some(c => c.name === migration.column)) db.exec(migration.sql);
+  const columns = await getRows(`PRAGMA table_info(${migration.table})`);
+  if (!columns.some(c => c.name === migration.column)) await execute(migration.sql);
 }
 
-if (getSetting('prices_include_tax','') === '') {
-  upsertSetting.run('prices_include_tax', process.env.PRICES_INCLUDE_TAX === 'true' ? '1' : '0');
+if ((await getSetting('prices_include_tax','')) === '') {
+  await upsertSetting('prices_include_tax', process.env.PRICES_INCLUDE_TAX === 'true' ? '1' : '0');
 }
 
 // One-time migration from the old storewide setting to each existing product.
 // This preserves a previously configured promotion while moving control to per-product discounts.
-if (getSetting('legacy_storewide_discount_migrated','0') !== '1') {
-  const legacy = Number(getSetting('automatic_discount_percent','0'));
+if ((await getSetting('legacy_storewide_discount_migrated','0')) !== '1') {
+  const legacy = Number(await getSetting('automatic_discount_percent','0'));
   const safeLegacy = normalizeProductDiscountPercent(legacy);
-  if (safeLegacy > 0) db.prepare('UPDATE products SET automatic_discount_percent=? WHERE automatic_discount_percent=0').run(safeLegacy);
-  upsertSetting.run('legacy_storewide_discount_migrated', '1');
+  if (safeLegacy > 0) await run('UPDATE products SET automatic_discount_percent=? WHERE automatic_discount_percent=0',[safeLegacy]);
+  await upsertSetting('legacy_storewide_discount_migrated', '1');
 }
 
 const slugify = (value) => value.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/[\s-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
 const escapeLike = value => String(value ?? '').replace(/!/g,'!!').replace(/%/g,'!%').replace(/_/g,'!_');
 
-if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('store_name')) upsertSetting.run('store_name', process.env.STORE_NAME || 'ShopEasy');
-if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('currency')) upsertSetting.run('currency', process.env.STORE_CURRENCY || 'EUR');
-if (!db.prepare('SELECT 1 FROM settings WHERE key=?').get('ai_enabled')) upsertSetting.run('ai_enabled', '0');
+if (!await getRow('SELECT 1 FROM settings WHERE key=?',['store_name'])) await upsertSetting('store_name', process.env.STORE_NAME || 'ShopEasy');
+if (!await getRow('SELECT 1 FROM settings WHERE key=?',['currency'])) await upsertSetting('currency', process.env.STORE_CURRENCY || 'EUR');
+if (!await getRow('SELECT 1 FROM settings WHERE key=?',['ai_enabled'])) await upsertSetting('ai_enabled', '0');
 
-if (process.env.SEED_DEMO_DATA === 'true' && db.prepare('SELECT COUNT(*) AS c FROM categories').get().c === 0) {
-  const insert = db.prepare('INSERT INTO categories(name,slug) VALUES(?,?)');
-  for (const name of ['New arrivals', 'Electronics', 'Fashion', 'Home', 'Beauty']) insert.run(name, slugify(name));
+if (process.env.SEED_DEMO_DATA === 'true' && Number((await getRow('SELECT COUNT(*) AS c FROM categories')).c) === 0) {
+  for (const name of ['New arrivals', 'Electronics', 'Fashion', 'Home', 'Beauty']) await run('INSERT INTO categories(name,slug) VALUES(?,?)',[name,slugify(name)]);
 }
-if (process.env.SEED_DEMO_DATA === 'true' && db.prepare('SELECT COUNT(*) AS c FROM products').get().c === 0) {
-  const category = (slug) => db.prepare('SELECT id FROM categories WHERE slug=?').get(slug)?.id || null;
-  const insert = db.prepare(`INSERT INTO products(name,slug,short_description,description,image_url,price_cents,sale_price_cents,sale_start,sale_end,sku,stock,category_id,tags,featured,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+if (process.env.SEED_DEMO_DATA === 'true' && Number((await getRow('SELECT COUNT(*) AS c FROM products')).c) === 0) {
+  const category = async (slug) => (await getRow('SELECT id FROM categories WHERE slug=?',[slug]))?.id || null;
+  const insert = `INSERT INTO products(name,slug,short_description,description,image_url,price_cents,sale_price_cents,sale_start,sale_end,sku,stock,category_id,tags,featured,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
   const start = new Date(Date.now() - 2 * 86400000).toISOString();
   const end = new Date(Date.now() + 10 * 86400000).toISOString();
-  insert.run('Astra Everyday Backpack','astra-everyday-backpack','A clean everyday carry for work, study and travel.','A versatile everyday backpack designed around a simple silhouette, practical organization and comfortable carry.','/assets/product-1.svg',8900,6900,start,end,'ASTRA-001',24,category('fashion'),'bag,travel,work',1,1);
-  insert.run('Nova Desk Lamp','nova-desk-lamp','Warm, adjustable light for focused work.','A minimal desk light with an adjustable angle and a soft warm mode for evenings.','/assets/product-2.svg',5900,null,null,null,'NOVA-002',40,category('home'),'desk,home,light',1,1);
-  insert.run('Core Stainless Bottle','core-stainless-bottle','Simple, durable and made for daily use.','A reusable stainless bottle with a clean shape and an everyday carry size.','/assets/product-3.svg',3200,2790,null,null,'CORE-003',60,category('fashion'),'bottle,travel',0,1);
-  insert.run('Studio Cable Kit','studio-cable-kit','An organized kit for everyday devices.','A compact cable kit for home and travel organization.','/assets/product-4.svg',2490,null,null,null,'STUDIO-004',18,category('electronics'),'desk,tech',1,1);
+  await run(insert,['Astra Everyday Backpack','astra-everyday-backpack','A clean everyday carry for work, study and travel.','A versatile everyday backpack designed around a simple silhouette, practical organization and comfortable carry.','/assets/product-1.svg',8900,6900,start,end,'ASTRA-001',24,await category('fashion'),'bag,travel,work',1,1]);
+  await run(insert,['Nova Desk Lamp','nova-desk-lamp','Warm, adjustable light for focused work.','A minimal desk light with an adjustable angle and a soft warm mode for evenings.','/assets/product-2.svg',5900,null,null,null,'NOVA-002',40,await category('home'),'desk,home,light',1,1]);
+  await run(insert,['Core Stainless Bottle','core-stainless-bottle','Simple, durable and made for daily use.','A reusable stainless bottle with a clean shape and an everyday carry size.','/assets/product-3.svg',3200,2790,null,null,'CORE-003',60,await category('fashion'),'bottle,travel',0,1]);
+  await run(insert,['Studio Cable Kit','studio-cable-kit','An organized kit for everyday devices.','A compact cable kit for home and travel organization.','/assets/product-4.svg',2490,null,null,null,'STUDIO-004',18,await category('electronics'),'desk,tech',1,1]);
 }
 
-export function cleanupSessions() {
-  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
+export async function cleanupSessions() {
+  await run('DELETE FROM sessions WHERE expires_at < ?',[Date.now()]);
 }
-export function createSession(userId = null, maxAgeMs = 1000 * 60 * 60 * 24 * 14) {
+export async function createSession(userId = null, maxAgeMs = 1000 * 60 * 60 * 24 * 14) {
   const id = crypto.randomBytes(32).toString('base64url');
-  db.prepare('INSERT INTO sessions(id,user_id,created_at,expires_at) VALUES(?,?,?,?)').run(id, userId, Date.now(), Date.now() + maxAgeMs);
+  await run('INSERT INTO sessions(id,user_id,created_at,expires_at) VALUES(?,?,?,?)',[id, userId, Date.now(), Date.now() + maxAgeMs]);
   return id;
 }
-export function getSession(id) {
+export async function getSession(id) {
   if (!id) return null;
-  const row = db.prepare('SELECT * FROM sessions WHERE id=? AND expires_at>?').get(id, Date.now());
+  const row = await getRow('SELECT * FROM sessions WHERE id=? AND expires_at>?',[id, Date.now()]);
   if (!row) return null;
   let cart = [];
   try {
@@ -243,55 +230,57 @@ export function getSession(id) {
   try { wishlist = JSON.parse(row.wishlist_json || '[]'); if (!Array.isArray(wishlist)) wishlist=[]; } catch { wishlist=[]; }
   return { ...row, cart, wishlist, coupon: row.coupon_code || null, csrf: row.csrf_token || null };
 }
-export function setSessionCsrf(id, token) { db.prepare('UPDATE sessions SET csrf_token=? WHERE id=?').run(token, id); }
-export function saveSessionCart(id, cart) {
+export async function setSessionCsrf(id, token) { await run('UPDATE sessions SET csrf_token=? WHERE id=?',[token, id]); }
+export async function saveSessionCart(id, cart) {
   const safeCart = (Array.isArray(cart) ? cart : []).filter(x => Number.isInteger(x?.productId) && x.productId > 0 && Number.isInteger(x?.quantity) && x.quantity > 0).slice(0, 50);
-  db.prepare('UPDATE sessions SET cart_json=?, expires_at=? WHERE id=?').run(JSON.stringify(safeCart), Date.now() + 1000 * 60 * 60 * 24 * 14, id);
+  await run('UPDATE sessions SET cart_json=?, expires_at=? WHERE id=?',[JSON.stringify(safeCart), Date.now() + 1000 * 60 * 60 * 24 * 14, id]);
 }
-export function saveSessionWishlist(id, wishlist) {
+export async function saveSessionWishlist(id, wishlist) {
   const safeWishlist = [...new Set((Array.isArray(wishlist) ? wishlist : []).map(Number).filter(Number.isInteger).filter(n => n > 0))].slice(0, 50);
-  db.prepare('UPDATE sessions SET wishlist_json=?, expires_at=? WHERE id=?').run(JSON.stringify(safeWishlist), Date.now() + 1000 * 60 * 60 * 24 * 14, id);
+  await run('UPDATE sessions SET wishlist_json=?, expires_at=? WHERE id=?',[JSON.stringify(safeWishlist), Date.now() + 1000 * 60 * 60 * 24 * 14, id]);
 }
-export function saveSessionCoupon(id, couponCode) {
+export async function saveSessionCoupon(id, couponCode) {
   const safe = couponCode ? String(couponCode).trim().toUpperCase().slice(0,40) : null;
-  db.prepare('UPDATE sessions SET coupon_code=?, expires_at=? WHERE id=?').run(safe, Date.now() + 1000 * 60 * 60 * 24 * 14, id);
+  await run('UPDATE sessions SET coupon_code=?, expires_at=? WHERE id=?',[safe, Date.now() + 1000 * 60 * 60 * 24 * 14, id]);
 }
-export function setSessionUser(id, userId) { db.prepare('UPDATE sessions SET user_id=?, expires_at=? WHERE id=?').run(userId, Date.now() + 1000 * 60 * 60 * 24 * 14, id); }
-export function destroySession(id) { db.prepare('DELETE FROM sessions WHERE id=?').run(id); }
+export async function setSessionUser(id, userId) { await run('UPDATE sessions SET user_id=?, expires_at=? WHERE id=?',[userId, Date.now() + 1000 * 60 * 60 * 24 * 14, id]); }
+export async function destroySession(id) { await run('DELETE FROM sessions WHERE id=?',[id]); }
 
-export function getUserById(id) { return db.prepare('SELECT id,email,role,created_at FROM users WHERE id=?').get(id); }
-export function getUserAuthByEmail(email) { return db.prepare('SELECT * FROM users WHERE email=?').get(email); }
-export function updateUserPassword(userId,passwordHash) { return db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash,userId).changes===1; }
-export function destroyUserSessionsExcept(userId,keepSessionId) { db.prepare('DELETE FROM sessions WHERE user_id=? AND id<>?').run(userId,keepSessionId||''); }
-export function createUser(email, passwordHash, role='customer') { return db.prepare('INSERT INTO users(email,password_hash,role) VALUES(?,?,?)').run(email, passwordHash, role).lastInsertRowid; }
-export function listCustomers({limit=50, offset=0, search=''}={}) {
+export async function getUserById(id) { return getRow('SELECT id,email,role,created_at FROM users WHERE id=?',[id]); }
+export async function getUserAuthByEmail(email) { return getRow('SELECT * FROM users WHERE email=?',[email]); }
+export async function updateUserPassword(userId,passwordHash) { return (await run('UPDATE users SET password_hash=? WHERE id=?',[passwordHash,userId])).changes===1; }
+export async function destroyUserSessionsExcept(userId,keepSessionId) { await run('DELETE FROM sessions WHERE user_id=? AND id<>?',[userId,keepSessionId||'']); }
+export async function createUser(email, passwordHash, role='customer') { return (await run('INSERT INTO users(email,password_hash,role) VALUES(?,?,?)',[email, passwordHash, role])).lastInsertRowid; }
+export async function listCustomers({limit=50, offset=0, search=''}={}) {
   const params={};
   const conditions=["u.role='customer'"];
   if(search){ const like=`%${escapeLike(String(search).trim().slice(0,120))}%`; conditions.push("(u.email LIKE @likeSearch ESCAPE '!')"); params.likeSearch=like; }
   params.limit=Math.min(Math.max(Number(limit)||50,1),200); params.offset=Math.max(Number(offset)||0,0);
-  return db.prepare(`SELECT u.id,u.email,u.created_at,COUNT(o.id) AS order_count,COALESCE(SUM(CASE WHEN o.status IN ('paid','processing','shipped','completed') THEN o.total_cents ELSE 0 END),0) AS lifetime_value_cents,
+  return getRows(`SELECT u.id,u.email,u.created_at,COUNT(o.id) AS order_count,COALESCE(SUM(CASE WHEN o.status IN ('paid','processing','shipped','completed') THEN o.total_cents ELSE 0 END),0) AS lifetime_value_cents,
     (SELECT o2.customer_phone FROM orders o2 WHERE o2.user_id=u.id AND o2.customer_phone<>'' ORDER BY o2.created_at DESC LIMIT 1) AS phone,
     (SELECT o3.shipping_city FROM orders o3 WHERE o3.user_id=u.id ORDER BY o3.created_at DESC LIMIT 1) AS last_city,
     (SELECT o4.shipping_country FROM orders o4 WHERE o4.user_id=u.id ORDER BY o4.created_at DESC LIMIT 1) AS last_country
-    FROM users u LEFT JOIN orders o ON o.user_id=u.id WHERE ${conditions.join(' AND ')} GROUP BY u.id ORDER BY u.created_at DESC LIMIT @limit OFFSET @offset`).all(params);
+    FROM users u LEFT JOIN orders o ON o.user_id=u.id WHERE ${conditions.join(' AND ')} GROUP BY u.id ORDER BY u.created_at DESC LIMIT @limit OFFSET @offset`,params);
 }
-export function countCustomers(search='') {
-  if(!search) return Number(db.prepare("SELECT COUNT(*) AS c FROM users WHERE role='customer'").get().c||0);
-  return Number(db.prepare("SELECT COUNT(*) AS c FROM users WHERE role='customer' AND email LIKE ? ESCAPE '!'").get(`%${escapeLike(String(search).trim().slice(0,120))}%`).c||0);
+export async function countCustomers(search='') {
+  if(!search) return Number((await getRow("SELECT COUNT(*) AS c FROM users WHERE role='customer'")).c||0);
+  return Number((await getRow("SELECT COUNT(*) AS c FROM users WHERE role='customer' AND email LIKE ? ESCAPE '!'",[`%${escapeLike(String(search).trim().slice(0,120))}%`])).c||0);
 }
-export function getDashboardStats() {
-  const products = db.prepare('SELECT COUNT(*) AS total, SUM(CASE WHEN active=1 THEN 1 ELSE 0 END) AS active, SUM(CASE WHEN active=1 AND stock-reserved_stock<=0 THEN 1 ELSE 0 END) AS sold_out FROM products').get();
-  const orders = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, COALESCE(SUM(CASE WHEN status IN ('paid','processing','shipped','completed') THEN total_cents ELSE 0 END),0) AS revenue FROM orders`).get();
-  const customers = db.prepare("SELECT COUNT(*) AS total FROM users WHERE role='customer'").get();
-  const stories = db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN active=1 AND datetime(published_at)<=datetime('now') AND datetime(expires_at)>=datetime('now') THEN 1 ELSE 0 END) AS live FROM stories").get();
+export async function getDashboardStats() {
+  const [products,orders,customers,stories] = await Promise.all([
+    getRow('SELECT COUNT(*) AS total, SUM(CASE WHEN active=1 THEN 1 ELSE 0 END) AS active, SUM(CASE WHEN active=1 AND stock-reserved_stock<=0 THEN 1 ELSE 0 END) AS sold_out FROM products'),
+    getRow(`SELECT COUNT(*) AS total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, COALESCE(SUM(CASE WHEN status IN ('paid','processing','shipped','completed') THEN total_cents ELSE 0 END),0) AS revenue FROM orders`),
+    getRow("SELECT COUNT(*) AS total FROM users WHERE role='customer'"),
+    getRow("SELECT COUNT(*) AS total, SUM(CASE WHEN active=1 AND datetime(published_at)<=datetime('now') AND datetime(expires_at)>=datetime('now') THEN 1 ELSE 0 END) AS live FROM stories")
+  ]);
   return { products, orders, customers, stories };
 }
 
-export function listCategories() { return db.prepare('SELECT * FROM categories ORDER BY name').all(); }
-export function createCategory(name, slug) { return Number(db.prepare('INSERT INTO categories(name,slug) VALUES(?,?)').run(name,slug).lastInsertRowid); }
-export function updateCategory(id, name, slug) { const changed=db.prepare('UPDATE categories SET name=?,slug=? WHERE id=?').run(name,slug,id).changes; if(changed!==1) throw new Error('NOT_FOUND'); return Number(id); }
-export function deleteCategory(id) { db.prepare('DELETE FROM categories WHERE id=?').run(id); }
-export function listProducts({search='', category='', sort='featured', onlyActive=true, featured=false, limit=48, offset=0} = {}) {
+export async function listCategories() { return getRows('SELECT * FROM categories ORDER BY name'); }
+export async function createCategory(name, slug) { return Number((await run('INSERT INTO categories(name,slug) VALUES(?,?)',[name,slug])).lastInsertRowid); }
+export async function updateCategory(id, name, slug) { const changed=(await run('UPDATE categories SET name=?,slug=? WHERE id=?',[name,slug,id])).changes; if(changed!==1) throw new Error('NOT_FOUND'); return Number(id); }
+export async function deleteCategory(id) { await run('DELETE FROM categories WHERE id=?',[id]); }
+export async function listProducts({search='', category='', sort='featured', onlyActive=true, featured=false, limit=48, offset=0} = {}) {
   const conditions = [];
   const params = {};
   if (onlyActive) conditions.push('p.active=1');
@@ -314,64 +303,64 @@ export function listProducts({search='', category='', sort='featured', onlyActiv
   const order=sortMap[sort]||sortMap.featured;
   params.limit = Math.min(Math.max(Number(limit) || 48, 1), 500);
   params.offset = Math.max(Number(offset) || 0, 0);
-  return db.prepare(`SELECT p.*, c.name AS category_name, c.slug AS category_slug, MAX(p.stock-p.reserved_stock,0) AS available_stock, ${availablePriceSql} AS available_price FROM products p LEFT JOIN categories c ON c.id=p.category_id ${where} ORDER BY ${order} LIMIT @limit OFFSET @offset`).all(params);
+  return getRows(`SELECT p.*, c.name AS category_name, c.slug AS category_slug, MAX(p.stock-p.reserved_stock,0) AS available_stock, ${availablePriceSql} AS available_price FROM products p LEFT JOIN categories c ON c.id=p.category_id ${where} ORDER BY ${order} LIMIT @limit OFFSET @offset`,params);
 }
-export function countProducts({search='', category='', onlyActive=true} = {}) {
+export async function countProducts({search='', category='', onlyActive=true} = {}) {
   const conditions=[]; const params={};
   if (onlyActive) conditions.push('p.active=1');
   if (search) { const tokens=search.split(/\s+/).filter(Boolean).slice(0,6); const clauses=[]; for (const token of tokens){ const key=`t${clauses.length}`; clauses.push(`(p.name LIKE @${key} ESCAPE '!' OR p.short_description LIKE @${key} ESCAPE '!' OR p.description LIKE @${key} ESCAPE '!' OR p.tags LIKE @${key} ESCAPE '!' OR p.sku LIKE @${key} ESCAPE '!')`); params[key]=`%${escapeLike(token)}%`; } if(clauses.length) conditions.push(`(${clauses.join(' AND ')})`); }
   if(category){conditions.push('c.slug=@category');params.category=category;}
   const where=conditions.length?`WHERE ${conditions.join(' AND ')}`:'';
-  return Number(db.prepare(`SELECT COUNT(*) AS c FROM products p LEFT JOIN categories c ON c.id=p.category_id ${where}`).get(params).c||0);
+  return Number((await getRow(`SELECT COUNT(*) AS c FROM products p LEFT JOIN categories c ON c.id=p.category_id ${where}`,params)).c||0);
 }
 
-export function getProductBySlug(slug) { return db.prepare('SELECT p.*, c.name AS category_name, c.slug AS category_slug, MAX(p.stock-p.reserved_stock,0) AS available_stock FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.slug=?').get(slug); }
-export function getProductById(id) { return db.prepare('SELECT p.*, MAX(p.stock-p.reserved_stock,0) AS available_stock FROM products p WHERE p.id=?').get(id); }
-export function getActiveStories(limit=24) {
+export async function getProductBySlug(slug) { return getRow('SELECT p.*, c.name AS category_name, c.slug AS category_slug, MAX(p.stock-p.reserved_stock,0) AS available_stock FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.slug=?',[slug]); }
+export async function getProductById(id) { return getRow('SELECT p.*, MAX(p.stock-p.reserved_stock,0) AS available_stock FROM products p WHERE id=?',[id]); }
+export async function getActiveStories(limit=24) {
   const safeLimit=Math.min(Math.max(Number(limit)||24,1),100);
-  return db.prepare(`SELECT s.*, p.name AS product_name, p.slug AS product_slug FROM stories s LEFT JOIN products p ON p.id=s.product_id
-    WHERE s.active=1 AND datetime(s.published_at)<=datetime('now') AND datetime(s.expires_at)>=datetime('now') ORDER BY s.published_at DESC LIMIT ?`).all(safeLimit);
+  return getRows(`SELECT s.*, p.name AS product_name, p.slug AS product_slug FROM stories s LEFT JOIN products p ON p.id=s.product_id
+    WHERE s.active=1 AND datetime(s.published_at)<=datetime('now') AND datetime(s.expires_at)>=datetime('now') ORDER BY s.published_at DESC LIMIT ?`,[safeLimit]);
 }
-export function listStories(limit=100) { return db.prepare('SELECT s.*, p.name AS product_name FROM stories s LEFT JOIN products p ON p.id=s.product_id ORDER BY s.published_at DESC LIMIT ?').all(Math.min(Math.max(Number(limit)||100,1),500)); }
-export function getStory(id) { return db.prepare('SELECT * FROM stories WHERE id=?').get(id); }
-export function listCoupons(limit=500) { return db.prepare('SELECT * FROM coupons ORDER BY active DESC, code LIMIT ?').all(Math.min(Math.max(Number(limit)||500,1),1000)); }
-export function getCoupon(code) { return db.prepare(`SELECT * FROM coupons WHERE code=? AND active=1 AND (expires_at IS NULL OR expires_at>?)`).get(code.trim().toUpperCase(), new Date().toISOString()); }
-export function getCouponById(id) { return db.prepare('SELECT * FROM coupons WHERE id=?').get(id); }
-export function adminCreateOrUpdateCoupon(data) {
+export async function listStories(limit=100) { return getRows('SELECT s.*, p.name AS product_name FROM stories s LEFT JOIN products p ON p.id=s.product_id ORDER BY s.published_at DESC LIMIT ?',[Math.min(Math.max(Number(limit)||100,1),500)]); }
+export async function getStory(id) { return getRow('SELECT * FROM stories WHERE id=?',[id]); }
+export async function listCoupons(limit=500) { return getRows('SELECT * FROM coupons ORDER BY active DESC, code LIMIT ?',[Math.min(Math.max(Number(limit)||500,1),1000)]); }
+export async function getCoupon(code) { return getRow(`SELECT * FROM coupons WHERE code=? AND active=1 AND (expires_at IS NULL OR expires_at>?)`,[code.trim().toUpperCase(), new Date().toISOString()]); }
+export async function getCouponById(id) { return getRow('SELECT * FROM coupons WHERE id=?',[id]); }
+export async function adminCreateOrUpdateCoupon(data) {
   const values = [data.code.toUpperCase(), data.type, data.value, data.minSubtotalCents, data.expiresAt || null, data.active ? 1 : 0];
   if (data.id) {
-    const changed=db.prepare('UPDATE coupons SET code=?,type=?,value=?,min_subtotal_cents=?,expires_at=?,active=? WHERE id=?').run(...values, data.id).changes;
+    const changed=(await run('UPDATE coupons SET code=?,type=?,value=?,min_subtotal_cents=?,expires_at=?,active=? WHERE id=?',[...values, data.id])).changes;
     if(changed!==1) throw new Error('NOT_FOUND');
     return Number(data.id);
   }
-  return Number(db.prepare('INSERT INTO coupons(code,type,value,min_subtotal_cents,expires_at,active) VALUES(?,?,?,?,?,?)').run(...values).lastInsertRowid);
+  return Number((await run('INSERT INTO coupons(code,type,value,min_subtotal_cents,expires_at,active) VALUES(?,?,?,?,?,?)',values)).lastInsertRowid);
 }
-export function deleteCoupon(id) { db.prepare('DELETE FROM coupons WHERE id=?').run(id); }
-export function getSetting(key, fallback='') { return db.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value ?? fallback; }
+export async function deleteCoupon(id) { await run('DELETE FROM coupons WHERE id=?',[id]); }
+export async function getSetting(key, fallback='') { return (await getRow('SELECT value FROM settings WHERE key=?',[key]))?.value ?? fallback; }
 export function getProductDiscountPercent(product) { return normalizeProductDiscountPercent(product?.automatic_discount_percent); }
-export function setSetting(key, value) { upsertSetting.run(key, value); }
-export function createAudit(userId, action, targetType, targetId, meta={}) { db.prepare('INSERT INTO audit_logs(user_id,action,target_type,target_id,meta_json) VALUES(?,?,?,?,?)').run(userId,action,targetType,targetId ? String(targetId) : null,JSON.stringify(meta)); }
-export function listAuditLogs(limit=150) { return db.prepare(`SELECT a.*,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT ?`).all(limit); }
-export function listOrders({limit=100,offset=0,search='',status=''}={}) {
+export async function setSetting(key, value) { await upsertSetting(key, value); }
+export async function createAudit(userId, action, targetType, targetId, meta={}) { await run('INSERT INTO audit_logs(user_id,action,target_type,target_id,meta_json) VALUES(?,?,?,?,?)',[userId,action,targetType,targetId ? String(targetId) : null,JSON.stringify(meta)]); }
+export async function listAuditLogs(limit=150) { return getRows(`SELECT a.*,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT ?`,[limit]); }
+export async function listOrders({limit=100,offset=0,search='',status=''}={}) {
   const conditions=[]; const params={};
   if(search){conditions.push("(CAST(o.id AS TEXT)=@search OR o.email LIKE @likeSearch ESCAPE '!' OR o.payment_reference LIKE @likeSearch ESCAPE '!')");params.search=search;params.likeSearch=`%${escapeLike(search)}%`;}
   if(status && ['pending','paid','processing','shipped','completed','cancelled'].includes(status)){conditions.push('o.status=@status');params.status=status;}
   const where=conditions.length?`WHERE ${conditions.join(' AND ')}`:'';
   params.limit=Math.min(Math.max(Number(limit)||100,1),200); params.offset=Math.max(Number(offset)||0,0);
-  return db.prepare(`SELECT o.*, u.email AS account_email FROM orders o LEFT JOIN users u ON u.id=o.user_id ${where} ORDER BY o.created_at DESC LIMIT @limit OFFSET @offset`).all(params);
+  return getRows(`SELECT o.*, u.email AS account_email FROM orders o LEFT JOIN users u ON u.id=o.user_id ${where} ORDER BY o.created_at DESC LIMIT @limit OFFSET @offset`,params);
 }
-export function countOrders({search='',status=''}={}) {
+export async function countOrders({search='',status=''}={}) {
   const conditions=[]; const params={};
   if(search){conditions.push("(CAST(o.id AS TEXT)=@search OR o.email LIKE @likeSearch ESCAPE '!' OR o.payment_reference LIKE @likeSearch ESCAPE '!')");params.search=search;params.likeSearch=`%${escapeLike(search)}%`;}
   if(status && ['pending','paid','processing','shipped','completed','cancelled'].includes(status)){conditions.push('o.status=@status');params.status=status;}
   const where=conditions.length?`WHERE ${conditions.join(' AND ')}`:'';
-  return Number(db.prepare(`SELECT COUNT(*) AS c FROM orders o ${where}`).get(params).c||0);
+  return Number((await getRow(`SELECT COUNT(*) AS c FROM orders o ${where}`,params)).c||0);
 }
-export function getOrderByClientToken(token) { return db.prepare('SELECT * FROM orders WHERE client_token=?').get(token); }
-export function saveCheckoutSession(orderId, sessionId, paymentUrl) { return db.prepare("UPDATE orders SET payment_reference=?,payment_url=?,updated_at=datetime('now') WHERE id=? AND status='pending'").run(sessionId,paymentUrl,orderId).changes===1; }
-export function markConfirmationEmailSent(orderId) { return db.prepare("UPDATE orders SET confirmation_email_sent_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND confirmation_email_sent_at IS NULL").run(orderId).changes===1; }
-export function getOrder(id) { const order = db.prepare('SELECT * FROM orders WHERE id=?').get(id); if (!order) return null; order.items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(id); return order; }
-export function listUserOrders(userId, limit=200) { return db.prepare('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT ?').all(userId, Math.min(Math.max(Number(limit)||200,1),500)); }
+export async function getOrderByClientToken(token) { return getRow('SELECT * FROM orders WHERE client_token=?',[token]); }
+export async function saveCheckoutSession(orderId, sessionId, paymentUrl) { return (await run("UPDATE orders SET payment_reference=?,payment_url=?,updated_at=datetime('now') WHERE id=? AND status='pending'",[sessionId,paymentUrl,orderId])).changes===1; }
+export async function markConfirmationEmailSent(orderId) { return (await run("UPDATE orders SET confirmation_email_sent_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND confirmation_email_sent_at IS NULL",[orderId])).changes===1; }
+export async function getOrder(id) { const order = await getRow('SELECT * FROM orders WHERE id=?',[id]); if (!order) return null; order.items = await getRows('SELECT * FROM order_items WHERE order_id=?',[id]); return order; }
+export async function listUserOrders(userId, limit=200) { return getRows('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT ?',[userId, Math.min(Math.max(Number(limit)||200,1),500)]); }
 
 export function baseEffectivePrice(product, now = new Date()) {
   const nowIso = now.toISOString();
@@ -385,14 +374,14 @@ export function effectivePrice(product, now = new Date()) {
   return applyPercentDiscountCents(base, getProductDiscountPercent(product));
 }
 
-export function releaseExpiredReservations() {
+export async function releaseExpiredReservations() {
   const graceMinutes=Math.max(5,Math.min(60,Number(process.env.RESERVATION_RELEASE_GRACE_MINUTES||10)||10));
   const cutoff = new Date(Date.now() - graceMinutes * 60 * 1000).toISOString();
-  const expired = db.prepare("SELECT id FROM orders WHERE status='pending' AND reservation_expires_at IS NOT NULL AND reservation_expires_at<?").all(cutoff);
-  for (const order of expired) cancelPendingOrder(order.id);
+  const expired = await getRows("SELECT id FROM orders WHERE status='pending' AND reservation_expires_at IS NOT NULL AND reservation_expires_at<?",[cutoff]);
+  for (const order of expired) await cancelPendingOrder(order.id);
 }
 
-export function createOrderAtomic({userId, email, customerPhone='', items, shipping, shippingCents=0, customerNote='', currency='EUR', coupon=null, paymentProvider='stripe', clientToken, termsAcceptedAt, reservationMinutes=60}) {
+export async function createOrderAtomic({userId, email, customerPhone='', items, shipping, shippingCents=0, customerNote='', currency='EUR', coupon=null, paymentProvider='stripe', clientToken, termsAcceptedAt, reservationMinutes=60}) {
   if (!Array.isArray(items) || items.length === 0) throw new Error('EMPTY_CART');
   if (!/^[A-Za-z0-9_-]{24,100}$/.test(clientToken || '')) throw new Error('INVALID_IDEMPOTENCY');
   const grouped = new Map();
@@ -403,11 +392,12 @@ export function createOrderAtomic({userId, email, customerPhone='', items, shipp
     grouped.set(productId, (grouped.get(productId) || 0) + quantity);
   }
   if ([...grouped.values()].some(q => q > 99)) throw new Error('INVALID_QUANTITY');
-  const tx = db.transaction(() => {
-    if (db.prepare('SELECT id FROM orders WHERE client_token=?').get(clientToken)) throw new Error('IDEMPOTENCY_EXISTS');
+  const tx = await db.transaction('write');
+  try {
+    if (await getRow('SELECT id FROM orders WHERE client_token=?',[clientToken],tx)) throw new Error('IDEMPOTENCY_EXISTS');
     const normalized = [];
     for (const [productId, quantity] of grouped) {
-      const product = getProductById(productId);
+      const product = await getRow('SELECT p.*, MAX(p.stock-p.reserved_stock,0) AS available_stock FROM products p WHERE id=?',[productId],tx);
       if (!product || !product.active) throw new Error('PRODUCT_UNAVAILABLE');
       const baseUnit = baseEffectivePrice(product);
       const unit = effectivePrice(product);
@@ -418,7 +408,7 @@ export function createOrderAtomic({userId, email, customerPhone='', items, shipp
     const subtotal = subtotalBeforeAutomaticDiscount;
     let couponDiscount = 0;
     if (coupon) {
-      const couponRow = getCoupon(coupon);
+      const couponRow = await getRow(`SELECT * FROM coupons WHERE code=? AND active=1 AND (expires_at IS NULL OR expires_at>?)`,[coupon.trim().toUpperCase(), new Date().toISOString()],tx);
       if (!couponRow) throw new Error('INVALID_COUPON');
       const couponBase = subtotalBeforeAutomaticDiscount - automaticDiscount;
       if (couponBase < couponRow.min_subtotal_cents) throw new Error('COUPON_MINIMUM');
@@ -435,49 +425,55 @@ export function createOrderAtomic({userId, email, customerPhone='', items, shipp
     const note=String(customerNote||'').slice(0,500);
     const phone=String(customerPhone||'').trim().slice(0,32);
     if(!/^\+?[0-9 ()-]{7,32}$/.test(phone)) throw new Error('INVALID_PHONE');
-    const insertOrder = db.prepare(`INSERT INTO orders(user_id,email,customer_phone,status,payment_provider,client_token,subtotal_cents,automatic_discount_cents,discount_cents,total_cents,currency,shipping_name,shipping_address,shipping_city,shipping_postal_code,shipping_country,shipping_cents,customer_note,terms_accepted_at,reservation_expires_at,payment_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-    const info = insertOrder.run(userId,email,phone,'pending',paymentProvider,clientToken,subtotal,automaticDiscount,discount,total,currency,shipping.name,shipping.address,shipping.city,shipping.postalCode,shipping.country,safeShippingCents,note,termsAcceptedAt,reservationExpires,null);
+    const info = await run(`INSERT INTO orders(user_id,email,customer_phone,status,payment_provider,client_token,subtotal_cents,automatic_discount_cents,discount_cents,total_cents,currency,shipping_name,shipping_address,shipping_city,shipping_postal_code,shipping_country,shipping_cents,customer_note,terms_accepted_at,reservation_expires_at,payment_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[userId,email,phone,'pending',paymentProvider,clientToken,subtotal,automaticDiscount,discount,total,currency,shipping.name,shipping.address,shipping.city,shipping.postalCode,shipping.country,safeShippingCents,note,termsAcceptedAt,reservationExpires,null],tx);
     const orderId = Number(info.lastInsertRowid);
-    const insertItem = db.prepare('INSERT INTO order_items(order_id,product_id,product_name,sku,quantity,unit_price_cents,total_cents) VALUES(?,?,?,?,?,?,?)');
-    const reserve = db.prepare('UPDATE products SET reserved_stock=reserved_stock+?,updated_at=datetime(\'now\') WHERE id=? AND stock-reserved_stock>=?');
     for (const line of normalized) {
-      if (reserve.run(line.quantity, line.product.id, line.quantity).changes !== 1) throw new Error('INSUFFICIENT_STOCK');
-      insertItem.run(orderId,line.product.id,line.product.name,line.product.sku,line.quantity,line.unit,line.total);
+      if ((await run("UPDATE products SET reserved_stock=reserved_stock+?,updated_at=datetime('now') WHERE id=? AND stock-reserved_stock>=?",[line.quantity,line.product.id,line.quantity],tx)).changes !== 1) throw new Error('INSUFFICIENT_STOCK');
+      await run('INSERT INTO order_items(order_id,product_id,product_name,sku,quantity,unit_price_cents,total_cents) VALUES(?,?,?,?,?,?,?)',[orderId,line.product.id,line.product.name,line.product.sku,line.quantity,line.unit,line.total],tx);
     }
+    await tx.commit();
     return {orderId,subtotal,automaticDiscount,discount,shipping:safeShippingCents,total,items:normalized,reservationExpires};
-  });
-  return tx();
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  }
 }
 
-export function markOrderPaid(id, paymentReference) {
-  const tx = db.transaction(() => {
-    const order = db.prepare("SELECT * FROM orders WHERE id=? AND status='pending'").get(id);
-    if (!order) return false;
-    const items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(id);
-    const consume = db.prepare('UPDATE products SET stock=stock-?, reserved_stock=reserved_stock-?, updated_at=datetime(\'now\') WHERE id=? AND stock>=? AND reserved_stock>=?');
+export async function markOrderPaid(id, paymentReference) {
+  const tx = await db.transaction('write');
+  try {
+    const order = await getRow("SELECT * FROM orders WHERE id=? AND status='pending'",[id],tx);
+    if (!order) { await tx.rollback(); return false; }
+    const items = await getRows('SELECT * FROM order_items WHERE order_id=?',[id],tx);
     for (const item of items) {
-      if (consume.run(item.quantity,item.quantity,item.product_id,item.quantity,item.quantity).changes !== 1) throw new Error('STOCK_INTEGRITY');
+      if ((await run("UPDATE products SET stock=stock-?, reserved_stock=reserved_stock-?, updated_at=datetime('now') WHERE id=? AND stock>=? AND reserved_stock>=?",[item.quantity,item.quantity,item.product_id,item.quantity,item.quantity],tx)).changes !== 1) throw new Error('STOCK_INTEGRITY');
     }
-    db.prepare("UPDATE orders SET status='paid',payment_reference=?,reservation_expires_at=NULL,updated_at=datetime('now') WHERE id=? AND status='pending'").run(paymentReference,id);
+    await run("UPDATE orders SET status='paid',payment_reference=?,reservation_expires_at=NULL,updated_at=datetime('now') WHERE id=? AND status='pending'",[paymentReference,id],tx);
+    await tx.commit();
     return true;
-  });
-  return tx();
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  }
 }
 
-export function cancelPendingOrder(id) {
-  const tx = db.transaction(() => {
-    const order = db.prepare("SELECT * FROM orders WHERE id=? AND status='pending'").get(id);
-    if (!order) return false;
-    const items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(id);
-    const release = db.prepare('UPDATE products SET reserved_stock=CASE WHEN reserved_stock>=? THEN reserved_stock-? ELSE 0 END, updated_at=datetime(\'now\') WHERE id=?');
-    for (const item of items) release.run(item.quantity,item.quantity,item.product_id);
-    db.prepare("UPDATE orders SET status='cancelled',reservation_expires_at=NULL,updated_at=datetime('now') WHERE id=? AND status='pending'").run(id);
+export async function cancelPendingOrder(id) {
+  const tx = await db.transaction('write');
+  try {
+    const order = await getRow("SELECT * FROM orders WHERE id=? AND status='pending'",[id],tx);
+    if (!order) { await tx.rollback(); return false; }
+    const items = await getRows('SELECT * FROM order_items WHERE order_id=?',[id],tx);
+    for (const item of items) await run("UPDATE products SET reserved_stock=CASE WHEN reserved_stock>=? THEN reserved_stock-? ELSE 0 END, updated_at=datetime('now') WHERE id=?",[item.quantity,item.quantity,item.product_id],tx);
+    await run("UPDATE orders SET status='cancelled',reservation_expires_at=NULL,updated_at=datetime('now') WHERE id=? AND status='pending'",[id],tx);
+    await tx.commit();
     return true;
-  });
-  return tx();
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  }
 }
 
-export function setOrderStatus(id,status) {
+export async function setOrderStatus(id,status) {
   const allowed = {
     paid: new Set(['processing']),
     processing: new Set(['shipped']),
@@ -486,31 +482,31 @@ export function setOrderStatus(id,status) {
     cancelled: new Set(),
     pending: new Set(['cancelled'])
   };
-  const current = db.prepare('SELECT status FROM orders WHERE id=?').get(id)?.status;
+  const current = (await getRow('SELECT status FROM orders WHERE id=?',[id]))?.status;
   if (!current || !allowed[current]?.has(status)) return false;
   if (current === 'pending' && status === 'cancelled') return cancelPendingOrder(id);
-  const changed = db.prepare('UPDATE orders SET status=?,updated_at=datetime(\'now\') WHERE id=? AND status=?').run(status,id,current);
+  const changed = (await run("UPDATE orders SET status=?,updated_at=datetime('now') WHERE id=? AND status=?",[status,id,current]));
   return changed.changes === 1;
 }
 
-export function adminCreateOrUpdateProduct(data) {
-  const existingReserved = data.id ? Number(db.prepare('SELECT reserved_stock FROM products WHERE id=?').get(data.id)?.reserved_stock || 0) : 0;
+export async function adminCreateOrUpdateProduct(data) {
+  const existingReserved = data.id ? Number((await getRow('SELECT reserved_stock FROM products WHERE id=?',[data.id]))?.reserved_stock || 0) : 0;
   if (data.stock < existingReserved) throw new Error('RESERVED_STOCK');
   const discountPercent = normalizeProductDiscountPercent(data.automaticDiscountPercent);
   const values = [data.name,data.slug,data.shortDescription,data.description,data.imageUrl,data.priceCents,data.salePriceCents ?? null,data.saleStart || null,data.saleEnd || null,discountPercent,data.sku,data.stock,data.categoryId || null,data.tags,data.featured?1:0,data.active?1:0];
   if (data.id) {
-    const changed=db.prepare(`UPDATE products SET name=?,slug=?,short_description=?,description=?,image_url=?,price_cents=?,sale_price_cents=?,sale_start=?,sale_end=?,automatic_discount_percent=?,sku=?,stock=?,category_id=?,tags=?,featured=?,active=?,updated_at=datetime('now') WHERE id=?`).run(...values,data.id).changes;
+    const changed=(await run(`UPDATE products SET name=?,slug=?,short_description=?,description=?,image_url=?,price_cents=?,sale_price_cents=?,sale_start=?,sale_end=?,automatic_discount_percent=?,sku=?,stock=?,category_id=?,tags=?,featured=?,active=?,updated_at=datetime('now') WHERE id=?`,[...values,data.id])).changes;
     if(changed!==1) throw new Error('NOT_FOUND');
     return Number(data.id);
   }
-  return Number(db.prepare(`INSERT INTO products(name,slug,short_description,description,image_url,price_cents,sale_price_cents,sale_start,sale_end,automatic_discount_percent,sku,stock,category_id,tags,featured,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...values).lastInsertRowid);
+  return Number((await run(`INSERT INTO products(name,slug,short_description,description,image_url,price_cents,sale_price_cents,sale_start,sale_end,automatic_discount_percent,sku,stock,category_id,tags,featured,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,values)).lastInsertRowid);
 }
-export function deleteProduct(id) { db.prepare('DELETE FROM products WHERE id=?').run(id); }
-export function adminCreateOrUpdateStory(data) {
+export async function deleteProduct(id) { await run('DELETE FROM products WHERE id=?',[id]); }
+export async function adminCreateOrUpdateStory(data) {
   const values = [data.title,data.body,data.imageUrl,data.linkUrl || '',data.productId || null,data.publishedAt,data.expiresAt,data.active?1:0];
-  if (data.id) { const changed=db.prepare(`UPDATE stories SET title=?,body=?,image_url=?,link_url=?,product_id=?,published_at=?,expires_at=?,active=? WHERE id=?`).run(...values,data.id).changes; if(changed!==1) throw new Error('NOT_FOUND'); return Number(data.id); }
-  return Number(db.prepare(`INSERT INTO stories(title,body,image_url,link_url,product_id,published_at,expires_at,active) VALUES(?,?,?,?,?,?,?,?)`).run(...values).lastInsertRowid);
+  if (data.id) { const changed=(await run(`UPDATE stories SET title=?,body=?,image_url=?,link_url=?,product_id=?,published_at=?,expires_at=?,active=? WHERE id=?`,[...values,data.id])).changes; if(changed!==1) throw new Error('NOT_FOUND'); return Number(data.id); }
+  return Number((await run(`INSERT INTO stories(title,body,image_url,link_url,product_id,published_at,expires_at,active) VALUES(?,?,?,?,?,?,?,?)`,values)).lastInsertRowid);
 }
-export function deleteStory(id) { db.prepare('DELETE FROM stories WHERE id=?').run(id); }
+export async function deleteStory(id) { await run('DELETE FROM stories WHERE id=?',[id]); }
 
 export default db;
