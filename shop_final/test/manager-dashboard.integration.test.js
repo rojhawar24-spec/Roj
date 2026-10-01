@@ -179,6 +179,7 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     imageUrl: '',
     active: 'on'
   })) productForm.set(key,value);
+  productForm.set('image',new Blob([Uint8Array.from([137,80,78,71,13,10,26,10,0,0,0,0])],{type:'image/png'}),'smoke.png');
   const saveProduct = await fetch(`${base}/admin/products/save`, {
     method: 'POST',
     headers: { cookie: managerCookie },
@@ -187,9 +188,15 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
   assert.equal(saveProduct.status, 302);
   assert.equal(saveProduct.headers.get('location'), '/admin/products');
-  const productQuery = await db.execute({ sql: 'SELECT id FROM products WHERE sku=?', args: [productSku] });
+  const productQuery = await db.execute({ sql: 'SELECT id,image_url FROM products WHERE sku=?', args: [productSku] });
   const createdProduct = productQuery.rows[0];
   assert.ok(createdProduct);
+  assert.match(createdProduct.image_url,/^\/uploads\/[a-f0-9]{32}\.png$/);
+  const uploadedImage = await fetch(`${base}${createdProduct.image_url}`);
+  assert.equal(uploadedImage.status,200);
+  assert.equal(uploadedImage.headers.get('content-type'),'image/png');
+  assert.deepEqual([...new Uint8Array(await uploadedImage.arrayBuffer())],[137,80,78,71,13,10,26,10,0,0,0,0]);
+  await db.execute({ sql: 'DELETE FROM uploaded_assets WHERE path=?', args: [createdProduct.image_url] });
   await db.execute({ sql: 'DELETE FROM audit_logs WHERE target_type=? AND target_id=?', args: ['product',String(createdProduct.id)] });
   await data.deleteProduct(Number(createdProduct.id));
 

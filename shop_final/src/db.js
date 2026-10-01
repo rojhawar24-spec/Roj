@@ -128,6 +128,12 @@ CREATE TABLE IF NOT EXISTS order_items (
   FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+CREATE TABLE IF NOT EXISTS uploaded_assets (
+  path TEXT PRIMARY KEY,
+  content_type TEXT NOT NULL CHECK(content_type IN ('image/jpeg','image/png','image/webp')),
+  data BLOB NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

@@ -115,6 +115,17 @@ app.use(express.urlencoded({extended:false,limit:'24kb'}));
 app.use(express.json({limit:'24kb'}));
 app.use(express.static(path.join(root,'public'),{index:false,maxAge:isProd?'7d':0}));
 
+app.get('/uploads/:filename',async(req,res,next)=>{
+  if(process.env.VERCEL!=='1') return res.sendStatus(404);
+  const filename=String(req.params.filename||'');
+  if(!/^[a-f0-9]{32}\.(?:png|jpg|webp)$/i.test(filename)) return res.sendStatus(404);
+  try {
+    const result=await db.execute({sql:'SELECT content_type,data FROM uploaded_assets WHERE path=?',args:[`/uploads/${filename}`]});
+    const asset=result.rows[0];
+    if(!asset) return res.sendStatus(404);
+    return res.type(asset.content_type).set('Cache-Control','public, max-age=31536000, immutable').set('X-Content-Type-Options','nosniff').send(Buffer.from(asset.data));
+  } catch(error) { return next(error); }
+});
 app.get('/health',async(req,res)=>{ try { await db.execute('SELECT 1'); return res.status(200).json({ok:true}); } catch { return res.status(503).json({ok:false}); } });
 app.use(generalLimiter);
 app.use(attachAuth);
@@ -194,19 +205,28 @@ async function uniqueCategorySlug(base,id=null) {
   while(await getRow('SELECT 1 FROM categories WHERE slug=? AND id<>?',[slug,id||0])) slug=`${rootSlug.slice(0,60)}-${n++}`;
   return slug;
 }
-function safeImagePath(buffer,mime) {
+async function safeImagePath(buffer,mime) {
   if(!assertUploadSignature(buffer,mime)) return null;
   const ext=mime==='image/png'?'png':mime==='image/webp'?'webp':'jpg';
   const name=`${crypto.randomBytes(16).toString('hex')}.${ext}`;
+  if(process.env.VERCEL==='1'){
+    const assetPath=`/uploads/${name}`;
+    await db.execute({sql:'INSERT INTO uploaded_assets(path,content_type,data) VALUES(?,?,?)',args:[assetPath,mime,new Uint8Array(buffer)]});
+    return assetPath;
+  }
   const dir=path.join(root,'public/uploads'); fs.mkdirSync(dir,{recursive:true}); fs.writeFileSync(path.join(dir,name),buffer,{flag:'wx'}); return `/uploads/${name}`;
 }
-function deleteUploadedAsset(url) {
+async function deleteUploadedAsset(url) {
   const value=String(url||'');
   const match=value.match(/^\/uploads\/([a-f0-9]{32}\.(?:png|jpg|webp))$/i);
   if(!match) return;
+  if(process.env.VERCEL==='1'){
+    await db.execute({sql:'DELETE FROM uploaded_assets WHERE path=?',args:[value]});
+    return;
+  }
   try { fs.unlinkSync(path.join(root,'public/uploads',match[1])); } catch {}
 }
-function safeProductImage(req) {
+async function safeProductImage(req) {
   if (req.file) return safeImagePath(req.file.buffer,req.file.mimetype);
   const url=cleanText(req.body.imageUrl,500);
   if (url && !isSafeUrl(url)) throw new Error('URL');
@@ -513,21 +533,21 @@ app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf
     const name=cleanText(req.body.name,120),price=moneyCents(req.body.price),saleText=String(req.body.salePrice||'').trim(),sale=saleText?moneyCents(saleText):null,automaticDiscountPercent=Number(req.body.automaticDiscountPercent);
     const stock=Number(req.body.stock),saleStart=dateTimeLocalToISOString(req.body.saleStart,storeTimeZone),saleEnd=dateTimeLocalToISOString(req.body.saleEnd,storeTimeZone),sku=cleanText(req.body.sku,60);
     if(!name||price===null||price<=0||saleText&&sale===null||sale!==null&&(sale<=0||sale>=price)||!Number.isInteger(automaticDiscountPercent)||automaticDiscountPercent<0||automaticDiscountPercent>90||!Number.isInteger(stock)||stock<0||stock>100000000||(saleStart&&saleEnd&&new Date(saleEnd)<=new Date(saleStart))||!sku) throw new Error('VALIDATION');
-    const image=safeProductImage(req); savedImage=image; if(req.file&&!image)throw new Error('IMAGE');
+    const image=await safeProductImage(req); savedImage=image; if(req.file&&!image)throw new Error('IMAGE');
     const categoryId=validId(req.body.categoryId)?Number(req.body.categoryId):null;
     if(categoryId && !await getRow('SELECT 1 FROM categories WHERE id=?',[categoryId]))throw new Error('CATEGORY');
     const data={id,name,slug:await uniqueSlug(name,id),shortDescription:cleanText(req.body.shortDescription,300),description:cleanText(req.body.description,5000),imageUrl:image,priceCents:price,salePriceCents:sale,saleStart,saleEnd,sku,stock,categoryId,tags:cleanText(req.body.tags,300),featured:req.body.featured==='on',active:req.body.active==='on',automaticDiscountPercent};
     const savedId=await adminCreateOrUpdateProduct(data);
     await createAudit(req.user.id,id?'product_updated':'product_created','product',savedId,{name:data.name,automaticDiscountPercent:data.automaticDiscountPercent});
-    if(req.file && previousImage && previousImage!==savedImage) deleteUploadedAsset(previousImage);
+    if(req.file && previousImage && previousImage!==savedImage) await deleteUploadedAsset(previousImage);
     return res.redirect('/admin/products');
   } catch(err) {
-    if(req.file && savedImage) deleteUploadedAsset(savedImage);
+    if(req.file && savedImage) await deleteUploadedAsset(savedImage);
     return res.status(400).render('admin/product-form',{product:req.body,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:err.message==='RESERVED_STOCK'?'Stock cannot be lower than stock currently reserved in checkout.':'Could not save product. Check the required fields, SKU, price, date and image.'});
   }
 });
 app.get('/admin/products/:id/edit',requireManager,async(req,res)=>{const product=await getProductById(Number(req.params.id));if(!product)return res.status(404).render('error',{title:'Product not found',message:'Product does not exist.'});render(res,'admin/product-form',{product,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null});});
-app.post('/admin/products/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const p=await getProductById(id);if(p?.reserved_stock>0)return res.status(400).render('error',{title:'Product is reserved',message:'This product cannot be deleted while checkout stock is reserved.'});await deleteProduct(id);deleteUploadedAsset(p?.image_url);await createAudit(req.user.id,'product_deleted','product',id);}res.redirect('/admin/products');});
+app.post('/admin/products/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const p=await getProductById(id);if(p?.reserved_stock>0)return res.status(400).render('error',{title:'Product is reserved',message:'This product cannot be deleted while checkout stock is reserved.'});await deleteProduct(id);await deleteUploadedAsset(p?.image_url);await createAudit(req.user.id,'product_deleted','product',id);}res.redirect('/admin/products');});
 
 app.get('/admin/stories',requireManager,async(req,res)=>render(res,'admin/stories',{stories:await listStories()}));
 app.get('/admin/stories/new',requireManager,async(req,res)=>render(res,'admin/story-form',{story:null,products:await listProducts({onlyActive:true}),error:null}));
@@ -542,14 +562,14 @@ app.post('/admin/stories/save',requireManager,upload.single('image'),verifyCsrf,
     if(!isSafeUrl(link))throw new Error('URL');
     const productId=validId(req.body.productId)?Number(req.body.productId):null;
     if(productId && !await getProductById(productId))throw new Error('PRODUCT');
-    const image=req.file?safeImagePath(req.file.buffer,req.file.mimetype):cleanText(req.body.imageUrl,500); savedImage=image;
+    const image=req.file?await safeImagePath(req.file.buffer,req.file.mimetype):cleanText(req.body.imageUrl,500); savedImage=image;
     if(req.file&&!image)throw new Error('IMAGE'); if(!isSafeUrl(image))throw new Error('URL');
     const savedId=await adminCreateOrUpdateStory({id,title,body:cleanText(req.body.body,1000),imageUrl:image,linkUrl:link,productId,publishedAt:published,expiresAt:expires,active:req.body.active==='on'});
-    await createAudit(req.user.id,'story_saved','story',savedId,{title}); if(req.file && previousImage && previousImage!==savedImage) deleteUploadedAsset(previousImage); return res.redirect('/admin/stories');
-  } catch { if(req.file && savedImage) deleteUploadedAsset(savedImage); return res.status(400).render('admin/story-form',{story:req.body,products:await listProducts({onlyActive:true}),error:'Could not save story. Check dates, URL, product and image.'}); }
+    await createAudit(req.user.id,'story_saved','story',savedId,{title}); if(req.file && previousImage && previousImage!==savedImage) await deleteUploadedAsset(previousImage); return res.redirect('/admin/stories');
+  } catch { if(req.file && savedImage) await deleteUploadedAsset(savedImage); return res.status(400).render('admin/story-form',{story:req.body,products:await listProducts({onlyActive:true}),error:'Could not save story. Check dates, URL, product and image.'}); }
 });
 app.get('/admin/stories/:id/edit',requireManager,async(req,res)=>{const story=await getStory(Number(req.params.id));if(!story)return res.status(404).render('error',{title:'Story not found',message:'Story does not exist.'});render(res,'admin/story-form',{story,products:await listProducts({onlyActive:true}),error:null});});
-app.post('/admin/stories/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const story=await getStory(id);await deleteStory(id);deleteUploadedAsset(story?.image_url);await createAudit(req.user.id,'story_deleted','story',id);}res.redirect('/admin/stories');});
+app.post('/admin/stories/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const story=await getStory(id);await deleteStory(id);await deleteUploadedAsset(story?.image_url);await createAudit(req.user.id,'story_deleted','story',id);}res.redirect('/admin/stories');});
 
 app.get('/admin/orders',requireManager,async(req,res)=>{
   const search=cleanText(req.query.search,80),status=cleanText(req.query.status,30);
