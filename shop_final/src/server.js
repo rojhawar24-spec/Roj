@@ -129,9 +129,6 @@ function sameOriginGuard(req,res,next){
   } catch { return res.status(403).render('error',{title:'Request blocked',message:'This request came from an unexpected origin.'}); }
   next();
 }
-app.use(sameOriginGuard);
-app.use(verifyCsrf);
-
 app.locals.formatDateTimeLocal = formatDateTimeLocal;
 app.locals.formatDateTimeDisplay = formatDateTimeDisplay;
 app.locals.storeTimeZone = storeTimeZone;
@@ -171,6 +168,8 @@ app.use(async(req,res,next)=>{
   next();
   } catch(error) { next(error); }
 });
+app.use(sameOriginGuard);
+app.use(verifyCsrf);
 
 function render(res,view,data={}) { return res.render(view,{...data}); }
 function localRedirect(req,res,fallback='/') {
@@ -601,6 +600,7 @@ app.use((err,req,res,next)=>{
   if(err?.message==='INVALID_IMAGE_TYPE')return res.status(400).render('error',{title:'Upload rejected',message:'Only JPG, PNG or WebP images are supported.'});
   if(err?.code==='LIMIT_FILE_COUNT')return res.status(400).render('error',{title:'Upload rejected',message:'Only one image may be uploaded.'});
   console.error(err);
+  for(const [key,value] of Object.entries({storeName:'ShopEasy',csrf:'',isLoggedIn:Boolean(req.user),user:req.user||null,wishlistCount:0,cartCount:0,supportEmail:'',businessPhone:'',enterpriseNumber:'',legalName:'',businessAddress:'',path:req.path||'/',isAdminRoute:req.path?.startsWith('/admin')||false,isCheckoutRoute:req.path?.startsWith('/checkout')||false})) if(res.locals[key]===undefined) res.locals[key]=value;
   return res.status(500).render('error',{title:'Something went wrong',message:'The request could not be completed.'});
 });
 

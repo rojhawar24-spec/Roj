@@ -35,6 +35,14 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
   assert.equal(forwardedLogin.status, 200);
 
+  const invalidCsrf = await fetch(`${base}/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ _csrf: 'invalid-token', email: 'invalid@example.test', password: 'Not-a-real-password-123' })
+  });
+  assert.equal(invalidCsrf.status, 403);
+  assert.match(await invalidCsrf.text(), /security token is missing or invalid/i);
+
   const anonymousDashboard = await fetch(`${base}/admin`, { redirect: 'manual' });
   assert.equal(anonymousDashboard.status, 302);
   assert.equal(anonymousDashboard.headers.get('location'), '/login?next=%2Fadmin');
