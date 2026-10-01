@@ -8,6 +8,7 @@ process.env.NODE_ENV = 'test';
 process.env.VERCEL = '1';
 process.env.TURSO_DATABASE_URL = ':memory:';
 process.env.TURSO_AUTH_TOKEN = 'test-only-token';
+process.env.VERCEL_URL = 'shop-deployment.vercel.app';
 process.env.ADMIN_EMAIL = 'manager-smoke@example.test';
 process.env.ADMIN_PASSWORD = `Smoke-${crypto.randomBytes(24).toString('hex')}-Safe`;
 process.env.BASE_URL = 'https://shop.example.test';
@@ -42,6 +43,34 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
   assert.equal(invalidCsrf.status, 403);
   assert.match(await invalidCsrf.text(), /security token is missing or invalid/i);
+
+  const originLoginPage = await fetch(`${base}/login`);
+  const originLoginHtml = await originLoginPage.text();
+  const originCsrf = originLoginHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
+  const originCookie = originLoginPage.headers.get('set-cookie')?.split(';')[0];
+  const deploymentOriginLogin = await fetch(`${base}/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: originCookie,
+      origin: 'https://shop-deployment.vercel.app'
+    },
+    body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
+  });
+  assert.equal(deploymentOriginLogin.status, 200);
+  assert.match(await deploymentOriginLogin.text(), /Invalid email or password\./);
+
+  const rejectedOrigin = await fetch(`${base}/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: originCookie,
+      origin: 'https://attacker.example'
+    },
+    body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
+  });
+  assert.equal(rejectedOrigin.status, 403);
+  assert.match(await rejectedOrigin.text(), /unexpected origin/i);
 
   const anonymousDashboard = await fetch(`${base}/admin`, { redirect: 'manual' });
   assert.equal(anonymousDashboard.status, 302);
