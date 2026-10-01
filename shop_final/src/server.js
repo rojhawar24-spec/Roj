@@ -158,7 +158,7 @@ app.use(async(req,res,next)=>{
   next();
   } catch(error) { next(error); }
 });
-app.use(verifyCsrf);
+app.use((req,res,next)=>req.is('multipart/form-data')?next():verifyCsrf(req,res,next));
 
 function render(res,view,data={}) { return res.render(view,{...data}); }
 function localRedirect(req,res,fallback='/') {
@@ -504,7 +504,7 @@ app.post('/admin/categories/delete',requireManager,async(req,res)=>{
 });
 app.get('/admin/products',requireManager,async(req,res)=>{const search=cleanText(req.query.search,80),category=cleanText(req.query.category,80),page=Math.max(1,Math.min(Number(req.query.page)||1,1000)),pageSize=50,offset=(page-1)*pageSize;const [total,products,categories]=await Promise.all([countProducts({search,category,onlyActive:false}),listProducts({search,category,onlyActive:false,limit:pageSize,offset}),listCategories()]);render(res,'admin/products',{products,categories,search,category,page,total,hasNext:offset+products.length<total,hasPrev:page>1});});
 app.get('/admin/products/new',requireManager,async(req,res)=>render(res,'admin/product-form',{product:null,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null}));
-app.post('/admin/products/save',requireManager,upload.single('image'),async(req,res)=>{
+app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf,async(req,res)=>{
   let savedImage=null;
   let previousImage=null;
   try {
@@ -531,7 +531,7 @@ app.post('/admin/products/delete',requireManager,async(req,res)=>{const id=Numbe
 
 app.get('/admin/stories',requireManager,async(req,res)=>render(res,'admin/stories',{stories:await listStories()}));
 app.get('/admin/stories/new',requireManager,async(req,res)=>render(res,'admin/story-form',{story:null,products:await listProducts({onlyActive:true}),error:null}));
-app.post('/admin/stories/save',requireManager,upload.single('image'),async(req,res)=>{
+app.post('/admin/stories/save',requireManager,upload.single('image'),verifyCsrf,async(req,res)=>{
   let savedImage=null;
   let previousImage=null;
   try {

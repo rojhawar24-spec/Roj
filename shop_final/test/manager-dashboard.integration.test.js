@@ -155,6 +155,44 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   assert.equal(dashboard.status, 200);
   assert.match(await dashboard.text(), /Your store, at a glance\./);
 
+  const productPage = await fetch(`${base}/admin/products/new`, { headers: { cookie: managerCookie } });
+  assert.equal(productPage.status, 200);
+  const productHtml = await productPage.text();
+  assert.match(productHtml, /name="salePrice"/);
+  const productCsrf = productHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
+  const productSku = `SMOKE-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+  const productForm = new FormData();
+  for (const [key,value] of Object.entries({
+    _csrf: productCsrf,
+    name: 'Temporary manager product',
+    sku: productSku,
+    categoryId: '',
+    shortDescription: 'Product flow integration test',
+    description: 'Temporary product created and deleted by the integration test.',
+    tags: 'test',
+    price: '12.34',
+    salePrice: '',
+    automaticDiscountPercent: '0',
+    saleStart: '',
+    saleEnd: '',
+    stock: '2',
+    imageUrl: '',
+    active: 'on'
+  })) productForm.set(key,value);
+  const saveProduct = await fetch(`${base}/admin/products/save`, {
+    method: 'POST',
+    headers: { cookie: managerCookie },
+    body: productForm,
+    redirect: 'manual'
+  });
+  assert.equal(saveProduct.status, 302);
+  assert.equal(saveProduct.headers.get('location'), '/admin/products');
+  const productQuery = await db.execute({ sql: 'SELECT id FROM products WHERE sku=?', args: [productSku] });
+  const createdProduct = productQuery.rows[0];
+  assert.ok(createdProduct);
+  await db.execute({ sql: 'DELETE FROM audit_logs WHERE target_type=? AND target_id=?', args: ['product',String(createdProduct.id)] });
+  await data.deleteProduct(Number(createdProduct.id));
+
   const customerEmail = 'customer-smoke@example.test';
   const customerPassword = 'Customer-strong-test-password-2026';
   const registrationPage = await fetch(`${base}/login?mode=register`);
