@@ -87,6 +87,18 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   assert.equal(projectDeploymentOriginLogin.status, 200);
   assert.match(await projectDeploymentOriginLogin.text(), /Invalid email or password\./);
 
+  const canonicalShopOriginLogin = await fetch(`${base}/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: originCookie,
+      origin: 'https://roj-shop.vercel.app'
+    },
+    body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
+  });
+  assert.equal(canonicalShopOriginLogin.status, 200);
+  assert.match(await canonicalShopOriginLogin.text(), /Invalid email or password\./);
+
   const rejectedOrigin = await fetch(`${base}/login`, {
     method: 'POST',
     headers: {
