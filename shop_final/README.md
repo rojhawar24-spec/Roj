@@ -52,12 +52,28 @@ Use HTTPS hosting, a real admin password, durable database/upload storage, real 
 
 ## Checks
 
+Install dependencies first (this also provides the `@libsql/client` native binding used by the database integration tests):
+
+```bash
+npm install
+```
+
+Then run the checks:
+
 ```bash
 npm run check
 npm test
 npm run audit:static
 node scripts/template-audit.mjs
 ```
+
+Or run everything, including dependency-based database integration tests, with a single command:
+
+```bash
+npm run audit
+```
+
+CI runs the same `npm ci && npm run audit` sequence on every push and pull request (see `.github/workflows/ci.yml`).
 
 Install dependencies in your deployment environment before starting the real application. The included load test is intended to run against a live local deployment.
 
