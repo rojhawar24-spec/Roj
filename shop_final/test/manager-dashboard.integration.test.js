@@ -144,14 +144,17 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     body: new URLSearchParams({
       _csrf: csrf,
       email: process.env.ADMIN_EMAIL,
-      password: process.env.ADMIN_PASSWORD
+      password: process.env.ADMIN_PASSWORD,
+      rememberMe: 'on'
     }),
     redirect: 'manual'
   });
     assert.equal(loginResponse.status, 303);
   assert.equal(loginResponse.headers.get('location'), '/admin');
 
-  const managerCookie = loginResponse.headers.get('set-cookie')?.split(';')[0];
+  const managerSetCookie = loginResponse.headers.get('set-cookie')||'';
+  assert.match(managerSetCookie,/Max-Age=1209600/i);
+  const managerCookie = managerSetCookie.split(';')[0];
   assert.ok(managerCookie);
   const dashboard = await fetch(`${base}/admin`, { headers: { cookie: managerCookie } });
   assert.equal(dashboard.status, 200);
@@ -240,7 +243,10 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   const customerPassword = 'Customer-strong-test-password-2026';
   const registrationPage = await fetch(`${base}/register`);
   const registrationHtml = await registrationPage.text();
-  assert.match(registrationHtml,/Create a customer account/);
+  assert.match(registrationHtml,/Create your account/);
+  assert.match(registrationHtml,/name="fullName"/);
+  assert.match(registrationHtml,/name="confirmPassword"/);
+  assert.match(registrationHtml,/name="termsAccepted"/);
   assert.match(registrationHtml,/action="\/register"/);
   assert.match(registrationHtml,/Use at least 12 characters/);
   const registrationCsrf = registrationHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
@@ -248,23 +254,38 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   const invalidRegistration = await fetch(`${base}/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: registrationCookie },
-    body: new URLSearchParams({ _csrf: registrationCsrf, email: customerEmail, password: 'short' })
+    body: new URLSearchParams({ _csrf: registrationCsrf, fullName:'Customer Test', email: customerEmail, password:'short', confirmPassword:'short', termsAccepted:'on' })
   });
   assert.equal(invalidRegistration.status,200);
   const invalidRegistrationHtml = await invalidRegistration.text();
   assert.match(invalidRegistrationHtml,/password with at least 12 characters/);
   assert.match(invalidRegistrationHtml,/value="customer-smoke@example\.test"/);
+  const mismatchedPasswords = await fetch(`${base}/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: registrationCookie },
+    body: new URLSearchParams({ _csrf: registrationCsrf, fullName:'Customer Test', email:customerEmail, password:customerPassword, confirmPassword:'Different-strong-password-2026', termsAccepted:'on' })
+  });
+  assert.match(await mismatchedPasswords.text(),/The passwords do not match/);
+  const missingConsent = await fetch(`${base}/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: registrationCookie },
+    body: new URLSearchParams({ _csrf: registrationCsrf, fullName:'Customer Test', email:customerEmail, password:customerPassword, confirmPassword:customerPassword })
+  });
+  assert.match(await missingConsent.text(),/Accept the Terms &amp; Conditions and Privacy Policy/);
   const registration = await fetch(`${base}/register`, {
     method: 'POST',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
       cookie: registrationCookie
     },
-    body: new URLSearchParams({ _csrf: registrationCsrf, email: customerEmail, password: customerPassword }),
+    body: new URLSearchParams({ _csrf: registrationCsrf, fullName:'Customer Test', email: customerEmail, password:customerPassword, confirmPassword:customerPassword, termsAccepted:'on' }),
     redirect: 'manual'
   });
     assert.equal(registration.status, 303);
   assert.equal(registration.headers.get('location'), '/account');
+    const savedCustomer = await data.getUserAuthByEmail(customerEmail);
+    assert.equal(savedCustomer.full_name,'Customer Test');
+    assert.ok(savedCustomer.terms_accepted_at);
   const registeredAccount = await fetch(`${base}/account`, {
     headers: { cookie: registration.headers.get('set-cookie')?.split(';')[0] }
   });
@@ -276,8 +297,8 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   const duplicateRegistrationCookie = duplicateRegistrationPage.headers.get('set-cookie')?.split(';')[0];
   const duplicateRegistration = await fetch(`${base}/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: duplicateRegistrationCookie },
-    body: new URLSearchParams({ _csrf: duplicateRegistrationCsrf, email: customerEmail, password: customerPassword })
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: duplicateRegistrationCookie, 'x-forwarded-for':'203.0.113.50' },
+    body: new URLSearchParams({ _csrf: duplicateRegistrationCsrf, fullName:'Customer Test', email: customerEmail, password:customerPassword, confirmPassword:customerPassword, termsAccepted:'on' })
   });
   assert.equal(duplicateRegistration.status,200);
   assert.match(await duplicateRegistration.text(),/An account with this email already exists\. Sign in instead\./);
@@ -289,7 +310,8 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     method: 'POST',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
-      cookie: customerInitialCookie
+      cookie: customerInitialCookie,
+      'x-forwarded-for':'203.0.113.51'
     },
     body: new URLSearchParams({
       _csrf: customerCsrf,
@@ -301,6 +323,7 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
   assert.equal(customerLogin.status, 303);
   assert.equal(customerLogin.headers.get('location'), '/account');
+  assert.doesNotMatch(customerLogin.headers.get('set-cookie')||'',/Max-Age=/i);
   const customerSession = customerLogin.headers.get('set-cookie')?.split(';')[0];
   const customerDashboard = await fetch(`${base}/admin`, {
     headers: { cookie: customerSession || `${sessionCookieName()}=invalid` },

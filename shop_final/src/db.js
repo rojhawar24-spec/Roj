@@ -7,9 +7,11 @@ await execute('PRAGMA foreign_keys = ON');
 await executeMultiple(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  full_name TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'customer' CHECK(role IN ('customer','manager','admin')),
+  terms_accepted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -164,6 +166,8 @@ if (!orderColumns.includes('confirmation_email_sent_at')) await execute("ALTER T
 // Small forward-only migrations for databases created by earlier versions.
 // Only skip a migration when the target column already exists; real SQL errors are allowed to fail loudly.
 const forwardMigrations = [
+  { table:'users', column:'full_name', sql:"ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''" },
+  { table:'users', column:'terms_accepted_at', sql:'ALTER TABLE users ADD COLUMN terms_accepted_at TEXT' },
   { table:'products', column:'reserved_stock', sql:'ALTER TABLE products ADD COLUMN reserved_stock INTEGER NOT NULL DEFAULT 0' },
   { table:'sessions', column:'wishlist_json', sql:"ALTER TABLE sessions ADD COLUMN wishlist_json TEXT NOT NULL DEFAULT '[]'" },
   { table:'sessions', column:'coupon_code', sql:'ALTER TABLE sessions ADD COLUMN coupon_code TEXT' },
@@ -252,11 +256,11 @@ export async function saveSessionCoupon(id, couponCode) {
 export async function setSessionUser(id, userId) { await run('UPDATE sessions SET user_id=?, expires_at=? WHERE id=?',[userId, Date.now() + 1000 * 60 * 60 * 24 * 14, id]); }
 export async function destroySession(id) { await run('DELETE FROM sessions WHERE id=?',[id]); }
 
-export async function getUserById(id) { return getRow('SELECT id,email,role,created_at FROM users WHERE id=?',[id]); }
+export async function getUserById(id) { return getRow('SELECT id,full_name,email,role,terms_accepted_at,created_at FROM users WHERE id=?',[id]); }
 export async function getUserAuthByEmail(email) { return getRow('SELECT * FROM users WHERE email=?',[email]); }
 export async function updateUserPassword(userId,passwordHash) { return (await run('UPDATE users SET password_hash=? WHERE id=?',[passwordHash,userId])).changes===1; }
 export async function destroyUserSessionsExcept(userId,keepSessionId) { await run('DELETE FROM sessions WHERE user_id=? AND id<>?',[userId,keepSessionId||'']); }
-export async function createUser(email, passwordHash, role='customer') { return (await run('INSERT INTO users(email,password_hash,role) VALUES(?,?,?)',[email, passwordHash, role])).lastInsertRowid; }
+export async function createUser(email, passwordHash, role='customer', fullName='', termsAcceptedAt=null) { return (await run('INSERT INTO users(email,password_hash,role,full_name,terms_accepted_at) VALUES(?,?,?,?,?)',[email, passwordHash, role, fullName, termsAcceptedAt])).lastInsertRowid; }
 export async function listCustomers({limit=50, offset=0, search=''}={}) {
   const params={};
   const conditions=["u.role='customer'"];

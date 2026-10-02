@@ -19,9 +19,9 @@ export async function attachAuth(req,res,next) {
     next();
   } catch(error) { next(error); }
 }
-export function cookieOptions() { return {httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:1000*60*60*24*14}; }
-export async function login(req,res,userId) { const oldSession=req.session; const newSid=await createSession(userId); await setSessionUser(newSid,userId); await setSessionCsrf(newSid,crypto.randomBytes(24).toString('base64url')); await saveSessionCart(newSid,oldSession?.cart||[]);
-  await saveSessionWishlist(newSid,oldSession?.wishlist||[]); await saveSessionCoupon(newSid,oldSession?.coupon||null); await destroySession(req.sessionId); res.cookie(sessionCookieName(),newSid,cookieOptions()); }
+export function cookieOptions(rememberMe=true) { const options={httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/'}; if(rememberMe) options.maxAge=1000*60*60*24*14; return options; }
+export async function login(req,res,userId,rememberMe=true) { const oldSession=req.session; const newSid=await createSession(userId); await setSessionUser(newSid,userId); await setSessionCsrf(newSid,crypto.randomBytes(24).toString('base64url')); await saveSessionCart(newSid,oldSession?.cart||[]);
+  await saveSessionWishlist(newSid,oldSession?.wishlist||[]); await saveSessionCoupon(newSid,oldSession?.coupon||null); await destroySession(req.sessionId); res.cookie(sessionCookieName(),newSid,cookieOptions(rememberMe)); }
 export async function logout(req,res) { await destroySession(req.sessionId); res.clearCookie(sessionCookieName(),{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/'}); }
 export function requireAuth(req,res,next) { if(!req.user) return res.redirect('/login?next='+encodeURIComponent(req.originalUrl)); next(); }
 export function requireManager(req,res,next) { if(!req.user) return res.redirect('/login?next='+encodeURIComponent(req.originalUrl)); if(!['manager','admin'].includes(req.user.role)) return res.status(403).render('error',{title:'Access denied',message:'You do not have permission to open this page.'}); next(); }
