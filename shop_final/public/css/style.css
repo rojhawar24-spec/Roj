@@ -428,6 +428,11 @@ main { min-height: 54vh; }
 .auth-terms { align-items: flex-start; margin: 3px 0; color: var(--muted) !important; font-size: 10px !important; font-weight: 500 !important; line-height: 1.5; }
 .auth-terms a { color: var(--ink); font-weight: 800; }
 .switch-auth { margin: 6px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
+.settings-checklist-wrap { padding-top: 0; }
+.settings-checklist { padding: 16px 18px; border: 1px solid var(--line); border-left: 4px solid #d58b24; background: #fffaf1; color: var(--ink); font-size: 12px; }
+.settings-checklist ul { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 5px 24px; margin: 10px 0; padding-left: 18px; color: #7a4d14; font-size: 11px; }
+.settings-checklist p { margin: 8px 0; }
+.settings-checklist small { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .success-card { text-align: center; }
 .success-card .hero-actions { justify-content: center; }
 .success-mark { width: 64px; height: 64px; margin: 0 auto 15px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-soft); color: var(--accent-dark); font-size: 26px; font-weight: 950; }

@@ -161,7 +161,10 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   assert.match(await dashboard.text(), /Your store, at a glance\./);
   const settingsPage = await fetch(`${base}/admin/settings`, { headers: { cookie: managerCookie } });
   assert.equal(settingsPage.status,200);
-  assert.match(await settingsPage.text(),/SETUP & INTEGRATIONS/);
+  const settingsHtml=await settingsPage.text();
+  assert.match(settingsHtml,/SETUP & INTEGRATIONS/);
+  assert.match(settingsHtml,/Save is blocked until these requirements are complete/);
+  assert.match(settingsHtml,/Cash on delivery does not require Stripe or order email/);
 
   const productPage = await fetch(`${base}/admin/products/new`, { headers: { cookie: managerCookie } });
   assert.equal(productPage.status, 200);
