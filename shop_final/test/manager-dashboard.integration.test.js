@@ -58,7 +58,9 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
   });
   assert.equal(deploymentOriginLogin.status, 200);
-  assert.match(await deploymentOriginLogin.text(), /Invalid email or password\./);
+  const deploymentOriginLoginHtml = await deploymentOriginLogin.text();
+  assert.match(deploymentOriginLoginHtml, /Email or password does not match/);
+  assert.match(deploymentOriginLoginHtml, /value="origin-smoke@example\.test"/);
 
   const previousDeploymentUrl = process.env.VERCEL_URL;
   delete process.env.VERCEL_URL;
@@ -73,7 +75,7 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
   process.env.VERCEL_URL = previousDeploymentUrl;
   assert.equal(requestHostOriginLogin.status, 200);
-  assert.match(await requestHostOriginLogin.text(), /Invalid email or password\./);
+  assert.match(await requestHostOriginLogin.text(), /Email or password does not match/);
 
   const projectDeploymentOriginLogin = await fetch(`${base}/login`, {
     method: 'POST',
@@ -85,7 +87,7 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
   });
   assert.equal(projectDeploymentOriginLogin.status, 200);
-  assert.match(await projectDeploymentOriginLogin.text(), /Invalid email or password\./);
+  assert.match(await projectDeploymentOriginLogin.text(), /Email or password does not match/);
 
   const canonicalShopOriginLogin = await fetch(`${base}/login`, {
     method: 'POST',
@@ -97,7 +99,7 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
   });
   assert.equal(canonicalShopOriginLogin.status, 200);
-  assert.match(await canonicalShopOriginLogin.text(), /Invalid email or password\./);
+  assert.match(await canonicalShopOriginLogin.text(), /Email or password does not match/);
 
   const rejectedOrigin = await fetch(`${base}/login`, {
     method: 'POST',
@@ -109,7 +111,7 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     body: new URLSearchParams({ _csrf: originCsrf, email: 'origin-smoke@example.test', password: 'Not-a-real-password-123' })
   });
   assert.equal(rejectedOrigin.status, 200);
-  assert.match(await rejectedOrigin.text(), /Invalid email or password\./);
+  assert.match(await rejectedOrigin.text(), /Email or password does not match/);
 
   const crossSiteWithoutCsrf = await fetch(`${base}/login`, {
     method: 'POST',
@@ -223,9 +225,22 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
 
   const customerEmail = 'customer-smoke@example.test';
   const customerPassword = 'Customer-strong-test-password-2026';
-  const registrationPage = await fetch(`${base}/login?mode=register`);
-  const registrationCsrf = (await registrationPage.text()).match(/name="_csrf" value="([^"]+)"/)?.[1];
+  const registrationPage = await fetch(`${base}/register`);
+  const registrationHtml = await registrationPage.text();
+  assert.match(registrationHtml,/Create a customer account/);
+  assert.match(registrationHtml,/action="\/register"/);
+  assert.match(registrationHtml,/Use at least 12 characters/);
+  const registrationCsrf = registrationHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
   const registrationCookie = registrationPage.headers.get('set-cookie')?.split(';')[0];
+  const invalidRegistration = await fetch(`${base}/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: registrationCookie },
+    body: new URLSearchParams({ _csrf: registrationCsrf, email: customerEmail, password: 'short' })
+  });
+  assert.equal(invalidRegistration.status,200);
+  const invalidRegistrationHtml = await invalidRegistration.text();
+  assert.match(invalidRegistrationHtml,/password with at least 12 characters/);
+  assert.match(invalidRegistrationHtml,/value="customer-smoke@example\.test"/);
   const registration = await fetch(`${base}/register`, {
     method: 'POST',
     headers: {
@@ -242,6 +257,17 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
   assert.equal(registeredAccount.status, 200);
   assert.match(await registeredAccount.text(), /customer-smoke@example\.test/);
+
+  const duplicateRegistrationPage = await fetch(`${base}/register`);
+  const duplicateRegistrationCsrf = (await duplicateRegistrationPage.text()).match(/name="_csrf" value="([^"]+)"/)?.[1];
+  const duplicateRegistrationCookie = duplicateRegistrationPage.headers.get('set-cookie')?.split(';')[0];
+  const duplicateRegistration = await fetch(`${base}/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: duplicateRegistrationCookie },
+    body: new URLSearchParams({ _csrf: duplicateRegistrationCsrf, email: customerEmail, password: customerPassword })
+  });
+  assert.equal(duplicateRegistration.status,200);
+  assert.match(await duplicateRegistration.text(),/An account with this email already exists\. Sign in instead\./);
 
   const customerLoginPage = await fetch(`${base}/login?next=%2Fadmin`);
   const customerCsrf = (await customerLoginPage.text()).match(/name="_csrf" value="([^"]+)"/)?.[1];

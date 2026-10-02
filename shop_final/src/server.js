@@ -358,12 +358,17 @@ app.post('/cart/coupon',couponLimiter,async(req,res)=>{
   return res.redirect('/cart?couponMessage=applied');
 });
 
-app.get('/login',(req,res)=>render(res,'login',{error:null,next:cleanText(req.query.next,200),mode:req.query.mode==='register'?'register':'login'}));
+app.get('/login',(req,res)=>render(res,'login',{error:null,next:cleanText(req.query.next,200),mode:req.query.mode==='register'?'register':'login',email:cleanText(req.query.email,120)}));
+app.get('/register',(req,res)=>render(res,'login',{error:null,next:'',mode:'register',email:cleanText(req.query.email,120)}));
 app.post('/login',loginLimiter,async(req,res)=>{
   const email=cleanText(req.body.email,120).toLowerCase(),password=String(req.body.password||'');
-  const user=await authenticate(email,password);
-  if(!user) return render(res,'login',{error:'Invalid email or password.',next:cleanText(req.body.next,200),mode:'login'});
-  await login(req,res,user.id);
+  const next=cleanText(req.body.next,200);
+  let user;
+  try { user=await authenticate(email,password); }
+  catch(error) { console.error('Sign-in failed',error); return res.status(503).render('login',{error:'Sign in is temporarily unavailable. Please try again shortly.',next,mode:'login',email}); }
+  if(!user) return render(res,'login',{error:'Email or password does not match. New here? Create an account.',next,mode:'login',email});
+  try { await login(req,res,user.id); }
+  catch(error) { console.error('Sign-in session could not be created',error); return res.status(503).render('login',{error:'Your account was found, but sign-in could not be completed. Please try again.',next,mode:'login',email}); }
   const requested=safeNavigationTarget(cleanText(req.body.next,200));
   const adminPath=requested==='/admin'||requested.startsWith('/admin/');
   const manager=['admin','manager'].includes(user.role);
@@ -371,9 +376,23 @@ app.post('/login',loginLimiter,async(req,res)=>{
 });
 app.post('/register',loginLimiter,async(req,res)=>{
   const email=cleanText(req.body.email,120).toLowerCase(),password=String(req.body.password||'');
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!isStrongEnoughPassword(password)) return render(res,'login',{error:'Use a valid email and a password of at least 12 characters.',mode:'register',next:''});
-  try { const id=await createUser(email,hashPassword(password),'customer'); await login(req,res,id); return res.redirect('/account'); }
-  catch { return render(res,'login',{error:'That email is already registered.',mode:'register',next:''}); }
+  const registrationLocals={mode:'register',next:'',email};
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!isStrongEnoughPassword(password)) return render(res,'login',{...registrationLocals,error:'Use a valid email and a password with at least 12 characters.'});
+  let userId;
+  try {
+    if(await getUserAuthByEmail(email)) return render(res,'login',{...registrationLocals,error:'An account with this email already exists. Sign in instead.'});
+    userId=await createUser(email,hashPassword(password),'customer');
+  } catch(error) {
+    if(error?.code==='SQLITE_CONSTRAINT_UNIQUE'||/unique constraint/i.test(String(error?.message||''))) return render(res,'login',{...registrationLocals,error:'An account with this email already exists. Sign in instead.'});
+    console.error('Customer account creation failed',error);
+    return res.status(503).render('login',{...registrationLocals,error:'We could not create your account right now. Please try again shortly.'});
+  }
+  try { await login(req,res,userId); }
+  catch(error) {
+    console.error('Customer account was created but sign-in failed',error);
+    return res.status(503).render('login',{...registrationLocals,error:'Your account was created, but automatic sign-in failed. Please use Sign in with this email.'});
+  }
+  return res.redirect('/account');
 });
 app.post('/logout',async(req,res)=>{await logout(req,res);res.redirect('/')});
 app.get('/account',requireAuth,async(req,res)=>render(res,'account',{orders:await listUserOrders(req.user.id)}));
