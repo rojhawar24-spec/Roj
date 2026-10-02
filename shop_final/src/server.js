@@ -175,8 +175,8 @@ app.use((req,res,next)=>req.is('multipart/form-data')?next():verifyCsrf(req,res,
 function render(res,view,data={}) { return res.render(view,{...data}); }
 function localRedirect(req,res,fallback='/') {
   const ref=req.get('referer');
-  try { const u=ref ? new URL(ref) : null; if (u && u.protocol===req.protocol && u.host===req.get('host') && u.pathname.startsWith('/') && !u.pathname.startsWith('//')) return res.redirect(u.pathname + u.search); } catch {}
-  return res.redirect(fallback);
+  try { const u=ref ? new URL(ref) : null; if (u && u.protocol===req.protocol && u.host===req.get('host') && u.pathname.startsWith('/') && !u.pathname.startsWith('//')) return res.redirect(303,u.pathname + u.search); } catch {}
+  return res.redirect(303,fallback);
 }
 function safeNavigationTarget(value, fallback='/account') { const target=cleanText(value,200); return isSafeLocalPath(target) ? target : fallback; }
 async function aiIsEnabled() {
@@ -348,14 +348,14 @@ app.get('/cart',async(req,res)=>{
 });
 app.post('/cart/coupon',couponLimiter,async(req,res)=>{
   const code=cleanText(req.body.code,40).toUpperCase();
-  if(!code){ req.session.coupon=null; await saveSessionCoupon(req.sessionId,null); return res.redirect('/cart?couponMessage=cleared'); }
+  if(!code){ req.session.coupon=null; await saveSessionCoupon(req.sessionId,null); return res.redirect(303,'/cart?couponMessage=cleared'); }
   const coupon=await getCoupon(code);
-  if(!coupon) { req.session.coupon=null; await saveSessionCoupon(req.sessionId,null); return res.redirect('/cart?couponMessage=invalid'); }
+  if(!coupon) { req.session.coupon=null; await saveSessionCoupon(req.sessionId,null); return res.redirect(303,'/cart?couponMessage=invalid'); }
   const subtotal=(await cartSummary(req)).subtotal;
-  if(subtotal<coupon.min_subtotal_cents) { req.session.coupon=null; await saveSessionCoupon(req.sessionId,null); return res.redirect('/cart?couponMessage=minimum'); }
+  if(subtotal<coupon.min_subtotal_cents) { req.session.coupon=null; await saveSessionCoupon(req.sessionId,null); return res.redirect(303,'/cart?couponMessage=minimum'); }
   req.session.coupon=code;
   await saveSessionCoupon(req.sessionId,code);
-  return res.redirect('/cart?couponMessage=applied');
+  return res.redirect(303,'/cart?couponMessage=applied');
 });
 
 app.get('/login',(req,res)=>render(res,'login',{error:null,next:cleanText(req.query.next,200),mode:req.query.mode==='register'?'register':'login',email:cleanText(req.query.email,120)}));
@@ -372,7 +372,7 @@ app.post('/login',loginLimiter,async(req,res)=>{
   const requested=safeNavigationTarget(cleanText(req.body.next,200));
   const adminPath=requested==='/admin'||requested.startsWith('/admin/');
   const manager=['admin','manager'].includes(user.role);
-  return res.redirect(manager?(adminPath?requested:'/admin'):(adminPath?'/account':requested));
+  return res.redirect(303,manager?(adminPath?requested:'/admin'):(adminPath?'/account':requested));
 });
 app.post('/register',loginLimiter,async(req,res)=>{
   const email=cleanText(req.body.email,120).toLowerCase(),password=String(req.body.password||'');
@@ -392,9 +392,9 @@ app.post('/register',loginLimiter,async(req,res)=>{
     console.error('Customer account was created but sign-in failed',error);
     return res.status(503).render('login',{...registrationLocals,error:'Your account was created, but automatic sign-in failed. Please use Sign in with this email.'});
   }
-  return res.redirect('/account');
+  return res.redirect(303,'/account');
 });
-app.post('/logout',async(req,res)=>{await logout(req,res);res.redirect('/')});
+app.post('/logout',async(req,res)=>{await logout(req,res);res.redirect(303,'/')});
 app.get('/account',requireAuth,async(req,res)=>render(res,'account',{orders:await listUserOrders(req.user.id)}));
 app.get('/account/security',requireAuth,async(req,res)=>render(res,'account-security',{error:null,changed:req.query.changed==='1'}));
 app.post('/account/security',loginLimiter,requireAuth,async(req,res)=>{
@@ -404,7 +404,7 @@ app.post('/account/security',loginLimiter,requireAuth,async(req,res)=>{
   if(!await updateUserPassword(req.user.id,hashPassword(nextPassword))) return res.status(500).render('account-security',{error:'The password could not be changed. Please try again.',changed:false});
   await destroyUserSessionsExcept(req.user.id,req.sessionId);
   await createAudit(req.user.id,'password_changed','user',req.user.id);
-  return res.redirect('/account/security?changed=1');
+  return res.redirect(303,'/account/security?changed=1');
 });
 
 app.get('/account/order/:id',requireAuth,async(req,res)=>{const order=await getOrder(Number(req.params.id));if(!order||order.user_id!==req.user.id)return res.status(404).render('error',{title:'Order not found',message:'This order is not available.'});render(res,'order',{order});});
@@ -417,7 +417,7 @@ app.get('/checkout',requireAuth,async(req,res)=>{
 });
 app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
   const summary=await cartSummary(req);
-  if(!summary.items.length) return res.redirect('/cart');
+  if(!summary.items.length) return res.redirect(303,'/cart');
   const launch=await storeLaunchConfig();
   if(!launch.ready) return render(res,'checkout',{summary,error:'The store is not ready to accept live orders yet. Complete Stripe, business details and store policies in the manager settings.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
   if(!stripeEnabled()) return render(res,'checkout',{summary,error:'Online payments are not configured yet. Add Stripe server credentials before accepting real orders.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
@@ -432,7 +432,7 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
   if(!/^[A-Za-z0-9_-]{24,100}$/.test(idem)) return render(res,'checkout',{summary,error:'Please retry the checkout.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
   let prior=await getOrderByClientToken(idem);
   if(prior && prior.user_id===req.user.id){
-    if(['paid','processing','shipped','completed'].includes(prior.status)) return res.redirect(`/checkout/success?order=${prior.id}`);
+    if(['paid','processing','shipped','completed'].includes(prior.status)) return res.redirect(303,`/checkout/success?order=${prior.id}`);
     const reservationExpired=prior.status==='pending' && prior.reservation_expires_at && new Date(prior.reservation_expires_at)<=new Date();
     if(reservationExpired){
       await cancelPendingOrder(prior.id);
@@ -445,17 +445,17 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
         return Boolean(current) && current.quantity===item.quantity;
       });
       if(sameItems){
-        if(prior.payment_url) return res.redirect(prior.payment_url);
+        if(prior.payment_url) return res.redirect(303,prior.payment_url);
         try {
           const checkoutItems=existing.items.map(item=>({product:{name:item.product_name},quantity:item.quantity,unit:item.unit_price_cents}));
           const checkout=await createStripeCheckout({orderId:existing.id,amountCents:existing.total_cents,discountCents:existing.discount_cents,shippingCents:existing.shipping_cents,currency:existing.currency,email:existing.email,items:checkoutItems,reservationExpires:existing.reservation_expires_at});
           if(!await saveCheckoutSession(existing.id,checkout.id,checkout.url)){
             const fresh=await getOrder(existing.id);
-            if(fresh && ['paid','processing','shipped','completed'].includes(fresh.status)) return res.redirect(`/checkout/success?order=${fresh.id}`);
-            if(fresh?.status==='pending' && fresh.payment_url) return res.redirect(fresh.payment_url);
+            if(fresh && ['paid','processing','shipped','completed'].includes(fresh.status)) return res.redirect(303,`/checkout/success?order=${fresh.id}`);
+            if(fresh?.status==='pending' && fresh.payment_url) return res.redirect(303,fresh.payment_url);
             throw new Error('CHECKOUT_SESSION_SAVE_FAILED');
           }
-          return res.redirect(checkout.url);
+          return res.redirect(303,checkout.url);
         } catch(err) {
           const messages={STRIPE_DISABLED:'Online payments are not configured yet.',INVALID_CHECKOUT_EXPIRY:'Checkout configuration is invalid.'};
           return render(res,'checkout',{summary,error:messages[err.message]||'The payment provider is temporarily unavailable. Your stock reservation is still protected; please retry this checkout.',idempotencyKey:idem});
@@ -477,10 +477,10 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
     const checkout=await createStripeCheckout({orderId:created.orderId,amountCents:created.total,discountCents:created.discount,shippingCents:created.shipping,currency,email,items:created.items,reservationExpires:created.reservationExpires});
     if (!await saveCheckoutSession(created.orderId,checkout.id,checkout.url)) {
       const fresh=await getOrder(created.orderId);
-      if (fresh && ['paid','processing','shipped','completed'].includes(fresh.status)) return res.redirect(`/checkout/success?order=${fresh.id}`);
+      if (fresh && ['paid','processing','shipped','completed'].includes(fresh.status)) return res.redirect(303,`/checkout/success?order=${fresh.id}`);
       throw new Error('CHECKOUT_SESSION_SAVE_FAILED');
     }
-    return res.redirect(checkout.url);
+    return res.redirect(303,checkout.url);
   } catch(err) {
     // Network/timeout failures are ambiguous: Stripe may have created a session already.
     // Keep the pending reservation so the deterministic order idempotency key can safely recover on retry.
@@ -541,7 +541,7 @@ app.post('/admin/categories/save',requireManager,async(req,res)=>{
     const slug=await uniqueCategorySlug(name,id);
     const savedId=id?await updateCategory(id,name,slug):await createCategory(name,slug);
     await createAudit(req.user.id,id?'category_updated':'category_created','category',savedId,{name});
-    return res.redirect('/admin/categories');
+    return res.redirect(303,'/admin/categories');
   } catch {
     return res.status(400).render('admin/categories',{categories:await listCategories(),editCategory:{...req.body,id:req.body.id||null},error:'Could not save category. Use a valid unique name.'});
   }
@@ -549,7 +549,7 @@ app.post('/admin/categories/save',requireManager,async(req,res)=>{
 app.post('/admin/categories/delete',requireManager,async(req,res)=>{
   const id=Number(req.body.id);
   if(validId(id)){await deleteCategory(id);await createAudit(req.user.id,'category_deleted','category',id);}
-  res.redirect('/admin/categories');
+  res.redirect(303,'/admin/categories');
 });
 app.get('/admin/products',requireManager,async(req,res)=>{const search=cleanText(req.query.search,80),category=cleanText(req.query.category,80),page=Math.max(1,Math.min(Number(req.query.page)||1,1000)),pageSize=50,offset=(page-1)*pageSize;const [total,products,categories]=await Promise.all([countProducts({search,category,onlyActive:false}),listProducts({search,category,onlyActive:false,limit:pageSize,offset}),listCategories()]);render(res,'admin/products',{products,categories,search,category,page,total,hasNext:offset+products.length<total,hasPrev:page>1});});
 app.get('/admin/products/new',requireManager,async(req,res)=>render(res,'admin/product-form',{product:null,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null}));
@@ -577,7 +577,7 @@ app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf
     const savedId=await adminCreateOrUpdateProduct(data);
     await createAudit(req.user.id,id?'product_updated':'product_created','product',savedId,{name:data.name,automaticDiscountPercent:data.automaticDiscountPercent});
     if(req.file && previousImage && previousImage!==savedImage) await deleteUploadedAsset(previousImage);
-    return res.redirect('/admin/products');
+    return res.redirect(303,'/admin/products');
   } catch(err) {
     if(req.file && savedImage) await deleteUploadedAsset(savedImage);
     const errors={NAME:'Enter a product name.',PRICE:'Enter a regular price greater than zero.',SALE_PRICE:'Sale price must be greater than zero and lower than the regular price.',DISCOUNT:'Automatic discount must be a whole number from 0 to 90.',STOCK:'Enter a whole stock quantity from 0 to 100,000,000.',SALE_WINDOW:'Sale end must be later than sale start.',SKU_TAKEN:'This SKU is already used by another product. Change it or leave it blank for an automatic SKU.',CATEGORY:'Choose an existing category or select No category.',IMAGE:'Use a valid JPG, PNG or WebP image up to 5 MB.',URL:'Image URL must use a trusted HTTPS address.',RESERVED_STOCK:'Stock cannot be lower than stock currently reserved in checkout.'};
@@ -585,7 +585,7 @@ app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf
   }
 });
 app.get('/admin/products/:id/edit',requireManager,async(req,res)=>{const product=await getProductById(Number(req.params.id));if(!product)return res.status(404).render('error',{title:'Product not found',message:'Product does not exist.'});render(res,'admin/product-form',{product,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null});});
-app.post('/admin/products/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const p=await getProductById(id);if(p?.reserved_stock>0)return res.status(400).render('error',{title:'Product is reserved',message:'This product cannot be deleted while checkout stock is reserved.'});await deleteProduct(id);await deleteUploadedAsset(p?.image_url);await createAudit(req.user.id,'product_deleted','product',id);}res.redirect('/admin/products');});
+app.post('/admin/products/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const p=await getProductById(id);if(p?.reserved_stock>0)return res.status(400).render('error',{title:'Product is reserved',message:'This product cannot be deleted while checkout stock is reserved.'});await deleteProduct(id);await deleteUploadedAsset(p?.image_url);await createAudit(req.user.id,'product_deleted','product',id);}res.redirect(303,'/admin/products');});
 
 app.get('/admin/stories',requireManager,async(req,res)=>render(res,'admin/stories',{stories:await listStories()}));
 app.get('/admin/stories/new',requireManager,async(req,res)=>render(res,'admin/story-form',{story:null,products:await listProducts({onlyActive:true}),error:null}));
@@ -603,11 +603,11 @@ app.post('/admin/stories/save',requireManager,upload.single('image'),verifyCsrf,
     const image=req.file?await safeImagePath(req.file.buffer,req.file.mimetype):cleanText(req.body.imageUrl,500); savedImage=image;
     if(req.file&&!image)throw new Error('IMAGE'); if(!isSafeUrl(image))throw new Error('URL');
     const savedId=await adminCreateOrUpdateStory({id,title,body:cleanText(req.body.body,1000),imageUrl:image,linkUrl:link,productId,publishedAt:published,expiresAt:expires,active:req.body.active==='on'});
-    await createAudit(req.user.id,'story_saved','story',savedId,{title}); if(req.file && previousImage && previousImage!==savedImage) await deleteUploadedAsset(previousImage); return res.redirect('/admin/stories');
+    await createAudit(req.user.id,'story_saved','story',savedId,{title}); if(req.file && previousImage && previousImage!==savedImage) await deleteUploadedAsset(previousImage); return res.redirect(303,'/admin/stories');
   } catch { if(req.file && savedImage) await deleteUploadedAsset(savedImage); return res.status(400).render('admin/story-form',{story:req.body,products:await listProducts({onlyActive:true}),error:'Could not save story. Check dates, URL, product and image.'}); }
 });
 app.get('/admin/stories/:id/edit',requireManager,async(req,res)=>{const story=await getStory(Number(req.params.id));if(!story)return res.status(404).render('error',{title:'Story not found',message:'Story does not exist.'});render(res,'admin/story-form',{story,products:await listProducts({onlyActive:true}),error:null});});
-app.post('/admin/stories/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const story=await getStory(id);await deleteStory(id);await deleteUploadedAsset(story?.image_url);await createAudit(req.user.id,'story_deleted','story',id);}res.redirect('/admin/stories');});
+app.post('/admin/stories/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const story=await getStory(id);await deleteStory(id);await deleteUploadedAsset(story?.image_url);await createAudit(req.user.id,'story_deleted','story',id);}res.redirect(303,'/admin/stories');});
 
 app.get('/admin/orders',requireManager,async(req,res)=>{
   const search=cleanText(req.query.search,80),status=cleanText(req.query.status,30);
@@ -616,7 +616,7 @@ app.get('/admin/orders',requireManager,async(req,res)=>{
   render(res,'admin/orders',{orders,search,status,page,pageSize,total,hasNext:offset+orders.length<total,hasPrev:page>1});
 });
 app.get('/admin/orders/:id',requireManager,async(req,res)=>{const order=await getOrder(Number(req.params.id));if(!order)return res.status(404).render('error',{title:'Order not found',message:'Order does not exist.'});render(res,'admin/order',{order});});
-app.post('/admin/orders/status',requireManager,async(req,res)=>{const id=Number(req.body.id),status=cleanText(req.body.status,30);if(validId(id)&&['processing','shipped','completed','cancelled'].includes(status)&&await setOrderStatus(id,status))await createAudit(req.user.id,'order_status_changed','order',id,{status});res.redirect(`/admin/orders/${id}`);});
+app.post('/admin/orders/status',requireManager,async(req,res)=>{const id=Number(req.body.id),status=cleanText(req.body.status,30);if(validId(id)&&['processing','shipped','completed','cancelled'].includes(status)&&await setOrderStatus(id,status))await createAudit(req.user.id,'order_status_changed','order',id,{status});res.redirect(303,`/admin/orders/${id}`);});
 
 app.get('/admin/coupons',requireManager,async(req,res)=>{const editId=validId(req.query.edit)?Number(req.query.edit):null;const [coupons,editCoupon]=await Promise.all([listCoupons(),editId?getCouponById(editId):null]);render(res,'admin/coupons',{coupons,editCoupon,error:null});});
 app.post('/admin/coupons/save',requireManager,async(req,res)=>{
@@ -625,10 +625,10 @@ app.post('/admin/coupons/save',requireManager,async(req,res)=>{
     const value=type==='fixed'?moneyCents(req.body.value):Number(req.body.value),minSubtotalCents=moneyCents(req.body.minSubtotal||'0'),expiresAt=dateTimeLocalToISOString(req.body.expiresAt,storeTimeZone);
     if(!/^[A-Z0-9_-]{3,40}$/.test(code)||!Number.isInteger(value)||value<=0||(type==='percent'&&value>100)||minSubtotalCents===null||!Number.isInteger(minSubtotalCents)||minSubtotalCents<0)throw new Error('VALIDATION');
     const savedId=await adminCreateOrUpdateCoupon({id,code,type,value,minSubtotalCents,expiresAt,active:req.body.active==='on'});
-    await createAudit(req.user.id,id?'coupon_updated':'coupon_created','coupon',savedId,{code,type});return res.redirect('/admin/coupons');
+    await createAudit(req.user.id,id?'coupon_updated':'coupon_created','coupon',savedId,{code,type});return res.redirect(303,'/admin/coupons');
   } catch { return res.status(400).render('admin/coupons',{coupons:await listCoupons(),editCoupon:{...req.body,id:req.body.id||null},error:'Could not save coupon. Check the code, value, minimum and expiry date.'}); }
 });
-app.post('/admin/coupons/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){await deleteCoupon(id);await createAudit(req.user.id,'coupon_deleted','coupon',id);}res.redirect('/admin/coupons');});
+app.post('/admin/coupons/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){await deleteCoupon(id);await createAudit(req.user.id,'coupon_deleted','coupon',id);}res.redirect(303,'/admin/coupons');});
 
 app.get('/admin/customers',requireManager,async(req,res)=>{const search=cleanText(req.query.search,120),page=Math.max(1,Math.min(Number(req.query.page)||1,1000)),pageSize=50,offset=(page-1)*pageSize;const [total,customers]=await Promise.all([countCustomers(search),listCustomers({limit:pageSize,offset,search})]);render(res,'admin/customers',{customers,search,page,total,hasNext:offset+Math.min(pageSize,total-offset)<total,hasPrev:page>1});});
 app.get('/admin/audit',requireManager,async(req,res)=>render(res,'admin/audit',{logs:await listAuditLogs()}));
@@ -637,7 +637,7 @@ app.post('/admin/settings',requireManager,async(req,res)=>{
   const storeName=cleanText(req.body.storeName,100),aiToggle=req.body.aiEnabled==='on',pricesIncludeTax=req.body.pricesIncludeTax==='on',currency=cleanText(req.body.currency,3).toUpperCase(),legalName=cleanText(req.body.legalName,160),businessAddress=cleanText(req.body.businessAddress,500),supportEmail=cleanText(req.body.supportEmail,160).toLowerCase(),businessPhone=cleanText(req.body.businessPhone,40),enterpriseNumber=cleanText(req.body.enterpriseNumber,40),vatNumber=cleanText(req.body.vatNumber,40),shippingFeeCents=moneyCents(req.body.shippingFee||'0'),privacyPolicy=cleanText(req.body.privacyPolicy,12000),termsPolicy=cleanText(req.body.termsPolicy,12000),shippingPolicy=cleanText(req.body.shippingPolicy,8000),returnsPolicy=cleanText(req.body.returnsPolicy,8000);
   if(!storeName||!isValidCurrency(currency)||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)||businessPhone.length<7||enterpriseNumber.length<6||shippingFeeCents===null||shippingFeeCents>100000||!legalName||!businessAddress||privacyPolicy.length<40||termsPolicy.length<40||shippingPolicy.length<40||returnsPolicy.length<40||!pricesIncludeTax) return res.status(400).render('admin/settings',{storeName,currency,availableCurrencies:STRIPE_TWO_DECIMAL_CURRENCIES,legalName,businessAddress,supportEmail,businessPhone,enterpriseNumber,vatNumber,shippingFeeCents,privacyPolicy,termsPolicy,shippingPolicy,returnsPolicy,pricesIncludeTax,aiEnabled:await aiIsEnabled(),stripeEnabled:stripeEnabled(),emailEnabled:emailEnabled(),sellableProductCount:(await storeLaunchConfig()).sellableProductCount,storeReady:false,error:'Check the store identity, policies and tax-inclusive consumer pricing setting. Business phone and registration number are required; all four customer policies must contain at least 40 characters.'});
   for(const [key,value] of Object.entries({store_name:storeName,ai_enabled:aiToggle?'1':'0',currency,legal_name:legalName,business_address:businessAddress,support_email:supportEmail,business_phone:businessPhone,enterprise_number:enterpriseNumber,vat_number:vatNumber,shipping_fee_cents:String(shippingFeeCents),privacy_policy:privacyPolicy,terms_policy:termsPolicy,shipping_policy:shippingPolicy,returns_policy:returnsPolicy,prices_include_tax:pricesIncludeTax?'1':'0'})) await setSetting(key,value);
-  await createAudit(req.user.id,'settings_updated','store',null,{storeName,currency,aiEnabled:aiToggle});res.redirect('/admin/settings');
+  await createAudit(req.user.id,'settings_updated','store',null,{storeName,currency,aiEnabled:aiToggle});res.redirect(303,'/admin/settings');
 });
 
 app.use((req,res)=>res.status(404).render('error',{title:'Page not found',message:'The page you requested does not exist.'}));

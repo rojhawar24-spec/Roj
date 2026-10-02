@@ -148,7 +148,7 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     }),
     redirect: 'manual'
   });
-  assert.equal(loginResponse.status, 302);
+    assert.equal(loginResponse.status, 303);
   assert.equal(loginResponse.headers.get('location'), '/admin');
 
   const managerCookie = loginResponse.headers.get('set-cookie')?.split(';')[0];
@@ -204,13 +204,23 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     body: productForm,
     redirect: 'manual'
   });
-  assert.equal(saveProduct.status, 302);
+  assert.equal(saveProduct.status, 303);
   assert.equal(saveProduct.headers.get('location'), '/admin/products');
   const productQuery = await db.execute({ sql: 'SELECT id,image_url,sku,slug FROM products WHERE name=?', args: [productName] });
   const createdProduct = productQuery.rows[0];
   assert.ok(createdProduct);
   assert.match(createdProduct.sku,/^TEMPORARY-MANAGER-PRODUCT(?:-\d+)?$/);
   assert.match(createdProduct.image_url,/^\/uploads\/[a-f0-9]{32}\.png$/);
+  const cartAdd = await fetch(`${base}/cart/add`, {
+    method: 'POST',
+    headers: { cookie: managerCookie, 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ _csrf: productCsrf, productId: String(createdProduct.id), quantity: '1' }),
+    redirect: 'manual'
+  });
+  assert.equal(cartAdd.status,303);
+  assert.equal(cartAdd.headers.get('location'),'/shop');
+  const savedCart = await fetch(`${base}/cart`, { headers: { cookie: managerCookie } });
+  assert.match(await savedCart.text(),/Temporary manager product/);
   for (const route of ['/', '/shop', `/product/${createdProduct.slug}`, '/admin/products']) {
     const renderedPage = await fetch(`${base}${route}`, { headers: { cookie: managerCookie } });
     assert.equal(renderedPage.status,200,`${route} should render with a product in the catalog`);
@@ -250,7 +260,7 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     body: new URLSearchParams({ _csrf: registrationCsrf, email: customerEmail, password: customerPassword }),
     redirect: 'manual'
   });
-  assert.equal(registration.status, 302);
+    assert.equal(registration.status, 303);
   assert.equal(registration.headers.get('location'), '/account');
   const registeredAccount = await fetch(`${base}/account`, {
     headers: { cookie: registration.headers.get('set-cookie')?.split(';')[0] }
@@ -286,9 +296,8 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     }),
     redirect: 'manual'
   });
-  assert.equal(customerLogin.status, 302);
+  assert.equal(customerLogin.status, 303);
   assert.equal(customerLogin.headers.get('location'), '/account');
-
   const customerSession = customerLogin.headers.get('set-cookie')?.split(';')[0];
   const customerDashboard = await fetch(`${base}/admin`, {
     headers: { cookie: customerSession || `${sessionCookieName()}=invalid` },
