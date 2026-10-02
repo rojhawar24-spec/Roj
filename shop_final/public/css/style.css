@@ -636,3 +636,24 @@ tbody tr:last-child td { border-bottom: 0; }
 .checkout-essentials { padding: 12px 14px; border: 1px solid #dbe2ec; border-radius: 13px; background: #f8fafc; color: #334155; font-size: 11px; line-height: 1.65; }
 .print-actions { margin: 10px 0 0; }
 @media print { body { background: #fff; } .site-header, .announcement, .site-footer, .mobile-bottom-nav, .print-actions { display:none !important; } .container { width:100%; } .panel { box-shadow:none !important; border-color:#d7dde7 !important; } }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1220;
+    --panel: #121a2b;
+    --ink: #f2f5fa;
+    --ink-soft: #cdd5e3;
+    --muted: #98a2b3;
+    --line: #243044;
+    --line-strong: #324058;
+    --accent-dark: #59ddb1;
+    --accent-soft: #10302a;
+    --blue-soft: #1a2142;
+    --danger: #ff8a8a;
+    --danger-soft: #3a1a1a;
+    --warning: #f5b94a;
+    --warning-soft: #33280f;
+  }
+  input, select, textarea { background: var(--panel); color: var(--ink); }
+  .btn-dark { background: var(--ink); color: var(--bg); }
+}

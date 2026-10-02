@@ -1,5 +1,0 @@
-
-> universal-shop@2.5.0 audit:static
-> node scripts/static-audit.mjs
-
-Static audit passed: 38 source/config files inspected.
