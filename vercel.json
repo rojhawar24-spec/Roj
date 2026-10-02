@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "buildCommand": "cd shop_final && npm ci",
+  "installCommand": "cd shop_final && npm ci",
+  "outputDirectory": "shop_final",
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "shop_final/api/index.js": {
+      "includeFiles": "{shop_final/views/**,shop_final/public/**}"
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/shop_final/api/index" }
+  ]
+}
