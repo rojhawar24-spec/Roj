@@ -178,3 +178,100 @@
   productDiscountInput?.addEventListener('input', updateDiscountPreview);
   updateDiscountPreview();
 })();
+
+(() => {
+  const form = document.querySelector('[data-product-form]');
+  if (!form) return;
+  const field = name => form.querySelector(`[name="${name}"]`);
+  const setState = (input, message) => {
+    if (!input) return;
+    const msg = input.closest('label')?.querySelector('[data-msg]');
+    input.classList.toggle('is-invalid', !!message);
+    input.classList.toggle('is-valid', !message && String(input.value).trim() !== '');
+    if (msg) { msg.textContent = message || ''; msg.classList.toggle('is-error', !!message); }
+  };
+  const num = v => Number(String(v).trim().replace(',', '.'));
+  const validators = {
+    name: i => i.value.trim() ? '' : 'Product name is required',
+    price: i => { const v = num(i.value); return !i.value.trim() ? 'Regular price is required' : (!Number.isFinite(v) || v <= 0 ? 'Price must be greater than 0' : ''); },
+    stock: i => { const v = num(i.value); return !Number.isInteger(v) || v < 0 ? 'Stock must be at least 0' : ''; },
+    sale: i => {
+      if (!i.value.trim()) return '';
+      const v = num(i.value), p = num(field('price').value);
+      if (!Number.isFinite(v) || v <= 0) return 'Sale price must be greater than 0';
+      return Number.isFinite(p) && p > 0 && v >= p ? 'Sale price must be lower than regular price' : '';
+    },
+    saleEnd: i => {
+      const s = field('saleStart').value;
+      return i.value && s && new Date(i.value) <= new Date(s) ? 'Sale end date must be after start date' : '';
+    }
+  };
+  const check = input => setState(input, validators[input.dataset.field](input));
+  form.querySelectorAll('[data-field]').forEach(input => {
+    input.addEventListener('input', () => { check(input); if (input.dataset.field === 'price') { const s = form.querySelector('[data-field=sale]'); if (s) check(s); } });
+    input.addEventListener('blur', () => check(input));
+  });
+  field('saleStart')?.addEventListener('input', () => check(form.querySelector('[data-field=saleEnd]')));
+
+  const nameInput = field('name');
+  const skuInput = form.querySelector('[data-sku-input]');
+  const skuMsg = form.querySelector('[data-sku-msg]');
+  let skuTouched = !!skuInput?.value;
+  let skuTimer;
+  const slugSku = v => v.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  const checkSku = async () => {
+    const sku = skuInput.value.trim();
+    if (!sku) { setState(skuInput, 'SKU is required'); return; }
+    try {
+      const res = await fetch(`/admin/products/check-sku?sku=${encodeURIComponent(sku)}&id=${encodeURIComponent(skuInput.dataset.productId || '')}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (skuInput.value.trim() !== sku) return;
+      setState(skuInput, data.ok ? '' : data.message);
+      if (data.ok && skuMsg) { skuMsg.textContent = data.message; skuMsg.classList.remove('is-error'); }
+    } catch { /* server validates on submit */ }
+  };
+  if (skuInput) {
+    skuInput.addEventListener('input', () => { skuTouched = true; clearTimeout(skuTimer); skuTimer = setTimeout(checkSku, 300); });
+    nameInput?.addEventListener('input', () => {
+      if (skuTouched) return;
+      skuInput.value = slugSku(nameInput.value);
+      clearTimeout(skuTimer); skuTimer = setTimeout(checkSku, 300);
+    });
+  }
+
+  const fileInput = form.querySelector('[data-image-input]');
+  const preview = form.querySelector('[data-image-preview]');
+  const dropzone = form.querySelector('[data-dropzone]');
+  const urlInput = form.querySelector('[data-image-url]');
+  const showPreview = src => { if (!preview) return; if (src) { preview.src = src; preview.hidden = false; } else { preview.removeAttribute('src'); preview.hidden = true; } };
+  const previewFile = file => {
+    if (!file) return showPreview(urlInput?.value.trim().startsWith('https://') ? urlInput.value.trim() : '');
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 5 * 1024 * 1024) {
+      fileInput.value = ''; showPreview('');
+      alert('Use a JPG, PNG or WebP image up to 5 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => showPreview(String(reader.result));
+    reader.readAsDataURL(file);
+  };
+  fileInput?.addEventListener('change', () => previewFile(fileInput.files[0]));
+  urlInput?.addEventListener('input', () => { if (!fileInput?.files.length) showPreview(urlInput.value.trim().startsWith('https://') ? urlInput.value.trim() : ''); });
+  if (dropzone && fileInput) {
+    ['dragenter', 'dragover'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('is-drag'); }));
+    ['dragleave', 'drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('is-drag'); }));
+    dropzone.addEventListener('drop', e => {
+      const file = e.dataTransfer?.files?.[0];
+      if (!file) return;
+      const dt = new DataTransfer(); dt.items.add(file); fileInput.files = dt.files;
+      previewFile(file);
+    });
+  }
+
+  form.addEventListener('submit', e => {
+    let firstBad = null;
+    form.querySelectorAll('[data-field]').forEach(i => { check(i); if (!firstBad && i.classList.contains('is-invalid')) firstBad = i; });
+    if (firstBad) { e.preventDefault(); firstBad.closest('details')?.setAttribute('open', ''); firstBad.focus(); }
+  });
+})();

@@ -636,3 +636,14 @@ tbody tr:last-child td { border-bottom: 0; }
 .checkout-essentials { padding: 12px 14px; border: 1px solid #dbe2ec; border-radius: 13px; background: #f8fafc; color: #334155; font-size: 11px; line-height: 1.65; }
 .print-actions { margin: 10px 0 0; }
 @media print { body { background: #fff; } .site-header, .announcement, .site-footer, .mobile-bottom-nav, .print-actions { display:none !important; } .container { width:100%; } .panel { box-shadow:none !important; border-color:#d7dde7 !important; } }
+
+.optional-section > summary { cursor: pointer; font-weight: 700; margin-bottom: 12px; }
+.dropzone { position: relative; padding: 18px; border: 2px dashed #cbd5e1; border-radius: 13px; background: #f8fafc; text-align: center; }
+.dropzone.is-drag { border-color: #10b981; background: #ecfdf5; }
+.image-preview { display: block; max-width: 220px; max-height: 220px; margin-top: 10px; border-radius: 12px; object-fit: cover; border: 1px solid #dbe2ec; }
+.image-preview[hidden] { display: none; }
+input.is-valid, select.is-valid { border-color: #16a34a; background-color: #f0fdf4; }
+input.is-invalid, select.is-invalid { border-color: #dc2626; background-color: #fef2f2; }
+.field-msg { display: block; min-height: 0; font-size: 12px; color: #16a34a; }
+.field-msg.is-error { color: #dc2626; }
+.alert ul { margin: 6px 0 0 18px; padding: 0; }
