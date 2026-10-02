@@ -204,11 +204,15 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
   assert.equal(saveProduct.status, 302);
   assert.equal(saveProduct.headers.get('location'), '/admin/products');
-  const productQuery = await db.execute({ sql: 'SELECT id,image_url,sku FROM products WHERE name=?', args: [productName] });
+  const productQuery = await db.execute({ sql: 'SELECT id,image_url,sku,slug FROM products WHERE name=?', args: [productName] });
   const createdProduct = productQuery.rows[0];
   assert.ok(createdProduct);
   assert.match(createdProduct.sku,/^TEMPORARY-MANAGER-PRODUCT(?:-\d+)?$/);
   assert.match(createdProduct.image_url,/^\/uploads\/[a-f0-9]{32}\.png$/);
+  for (const route of ['/', '/shop', `/product/${createdProduct.slug}`, '/admin/products']) {
+    const renderedPage = await fetch(`${base}${route}`, { headers: { cookie: managerCookie } });
+    assert.equal(renderedPage.status,200,`${route} should render with a product in the catalog`);
+  }
   const uploadedImage = await fetch(`${base}${createdProduct.image_url}`);
   assert.equal(uploadedImage.status,200);
   assert.equal(uploadedImage.headers.get('content-type'),'image/png');

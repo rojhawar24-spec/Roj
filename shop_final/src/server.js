@@ -166,6 +166,7 @@ app.use(async(req,res,next)=>{
   res.locals.path=req.path;
   res.locals.isAdminRoute=req.path.startsWith('/admin');
   res.locals.isCheckoutRoute=req.path.startsWith('/checkout');
+  res.locals.app={locals:app.locals};
   next();
   } catch(error) { next(error); }
 });
