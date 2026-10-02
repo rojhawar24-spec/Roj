@@ -167,6 +167,7 @@ app.use(async(req,res,next)=>{
   res.locals.isAdminRoute=req.path.startsWith('/admin');
   res.locals.isCheckoutRoute=req.path.startsWith('/checkout');
   res.locals.app={locals:app.locals};
+  res.locals.paymentMode=launch.paymentMode;
   next();
   } catch(error) { next(error); }
 });
@@ -190,7 +191,9 @@ async function storeLaunchConfig() {
   const pricesIncludeTax=pricesSetting==='1';
   const sellableProductCount=Number(sellableProducts?.c||0);
   const shippingConfigured=Math.max(0,Number(shippingFee)||0)<=100000;
-  return {supportEmail,businessPhone,enterpriseNumber,legalName,businessAddress,policies,pricesIncludeTax,sellableProductCount,shippingConfigured,emailEnabled:emailEnabled(),ready:Boolean(supportEmail&&businessPhone&&enterpriseNumber&&legalName&&businessAddress&&policies&&pricesIncludeTax&&shippingConfigured&&sellableProductCount>0&&stripeEnabled()&&emailEnabled())};
+  const paymentMode=await getSetting('payment_mode','cash_on_delivery');
+  const paymentReady=paymentMode==='cash_on_delivery'||(stripeEnabled()&&emailEnabled());
+  return {supportEmail,businessPhone,enterpriseNumber,legalName,businessAddress,policies,pricesIncludeTax,sellableProductCount,shippingConfigured,paymentMode,emailEnabled:emailEnabled(),ready:Boolean(supportEmail&&businessPhone&&enterpriseNumber&&legalName&&businessAddress&&policies&&pricesIncludeTax&&shippingConfigured&&sellableProductCount>0&&paymentReady)};
 }
 async function uniqueSlug(base,id=null) {
   const cleaned=base.toLowerCase().trim().replace(/[^a-z0-9\s-]/g,'').replace(/[\s-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,70);
@@ -418,14 +421,14 @@ app.get('/checkout',requireAuth,async(req,res)=>{
   const summary=await cartSummary(req);
   if(!summary.items.length) return res.redirect('/cart');
   const launch=await storeLaunchConfig();
-  render(res,'checkout',{summary,error:launch.ready?null:'The store is not ready to accept live orders yet. The manager must finish payment and business-policy setup first.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
+  render(res,'checkout',{summary,paymentMode:launch.paymentMode,error:launch.ready?null:'The manager must finish business identity, tax and customer-policy setup before accepting orders.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
 });
 app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
   const summary=await cartSummary(req);
   if(!summary.items.length) return res.redirect(303,'/cart');
   const launch=await storeLaunchConfig();
-  if(!launch.ready) return render(res,'checkout',{summary,error:'The store is not ready to accept live orders yet. Complete Stripe, business details and store policies in the manager settings.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
-  if(!stripeEnabled()) return render(res,'checkout',{summary,error:'Online payments are not configured yet. Add Stripe server credentials before accepting real orders.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
+  if(!launch.ready) return render(res,'checkout',{summary,paymentMode:launch.paymentMode,error:'The manager must complete business identity, tax and customer policies before accepting orders.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
+  if(launch.paymentMode==='stripe'&&!stripeEnabled()) return render(res,'checkout',{summary,paymentMode:launch.paymentMode,error:'Online payments are not configured yet. Choose cash on delivery or configure Stripe in manager settings.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
   const email=req.user.email.toLowerCase();
   const customerPhone=cleanText(req.body.customerPhone,32);
   const country=cleanText(req.body.shippingCountry,80);
@@ -450,6 +453,7 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
         return Boolean(current) && current.quantity===item.quantity;
       });
       if(sameItems){
+        if(prior.payment_provider==='cash_on_delivery') return res.redirect(303,`/checkout/success?order=${prior.id}`);
         if(prior.payment_url) return res.redirect(303,prior.payment_url);
         try {
           const checkoutItems=existing.items.map(item=>({product:{name:item.product_name},quantity:item.quantity,unit:item.unit_price_cents}));
@@ -477,8 +481,10 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
   let created;
   try {
     const currency=await getSetting('currency','EUR');
-    created=await createOrderAtomic({userId:req.user.id,email,customerPhone,items:summary.items,coupon:summary.coupon?.code||null,currency,shipping,shippingCents:summary.shipping,customerNote,paymentProvider:'stripe',clientToken:idem,termsAcceptedAt:new Date().toISOString(),reservationMinutes:checkoutReservationMinutes});
-    await createAudit(req.user.id,'order_created','order',created.orderId,{total:created.total,paymentProvider:'stripe'});
+    const paymentProvider=launch.paymentMode==='cash_on_delivery'?'cash_on_delivery':'stripe';
+    created=await createOrderAtomic({userId:req.user.id,email,customerPhone,items:summary.items,coupon:summary.coupon?.code||null,currency,shipping,shippingCents:summary.shipping,customerNote,paymentProvider,clientToken:idem,termsAcceptedAt:new Date().toISOString(),reservationMinutes:paymentProvider==='cash_on_delivery'?1440:checkoutReservationMinutes});
+    await createAudit(req.user.id,'order_created','order',created.orderId,{total:created.total,paymentProvider});
+    if(paymentProvider==='cash_on_delivery') return res.redirect(303,`/checkout/success?order=${created.orderId}`);
     const checkout=await createStripeCheckout({orderId:created.orderId,amountCents:created.total,discountCents:created.discount,shippingCents:created.shipping,currency,email,items:created.items,reservationExpires:created.reservationExpires});
     if (!await saveCheckoutSession(created.orderId,checkout.id,checkout.url)) {
       const fresh=await getOrder(created.orderId);
@@ -497,8 +503,8 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
 app.get('/checkout/success',requireAuth,async(req,res)=>{
   const order=await getOrder(Number(req.query.order));
   if(!order||order.user_id!==req.user.id)return res.status(404).render('error',{title:'Order not found',message:'This order could not be found.'});
-  if(order.status==='paid'||order.status==='processing'||order.status==='shipped'||order.status==='completed'){req.session.cart=[];req.session.coupon=null;await saveSessionCart(req.sessionId,[]);await saveSessionCoupon(req.sessionId,null);}
-  render(res,'success',{order});
+  if(order.status==='paid'||order.status==='processing'||order.status==='shipped'||order.status==='completed'||(order.payment_provider==='cash_on_delivery'&&order.status==='pending')){req.session.cart=[];req.session.coupon=null;await saveSessionCart(req.sessionId,[]);await saveSessionCoupon(req.sessionId,null);}
+  render(res,'success',{order,cancelled:false,waitingForProviderExpiry:false});
 });
 app.get('/checkout/cancel',requireAuth,async(req,res)=>{
   const order=await getOrder(Number(req.query.order));
@@ -620,7 +626,7 @@ app.get('/admin/orders',requireManager,async(req,res)=>{
   const [orders,total]=await Promise.all([listOrders({search,status,limit:pageSize,offset}),countOrders({search,status})]);
   render(res,'admin/orders',{orders,search,status,page,pageSize,total,hasNext:offset+orders.length<total,hasPrev:page>1});
 });
-app.get('/admin/orders/:id',requireManager,async(req,res)=>{const order=await getOrder(Number(req.params.id));if(!order)return res.status(404).render('error',{title:'Order not found',message:'Order does not exist.'});render(res,'admin/order',{order});});
+app.get('/admin/orders/:id',requireManager,async(req,res)=>{const order=await getOrder(Number(req.params.id));if(!order)return res.status(404).render('error',{title:'Order not found',message:'Order does not exist.'});render(res,order.payment_provider==='cash_on_delivery'?'admin/order-cash':'admin/order',{order});});
 app.post('/admin/orders/status',requireManager,async(req,res)=>{const id=Number(req.body.id),status=cleanText(req.body.status,30);if(validId(id)&&['processing','shipped','completed','cancelled'].includes(status)&&await setOrderStatus(id,status))await createAudit(req.user.id,'order_status_changed','order',id,{status});res.redirect(303,`/admin/orders/${id}`);});
 
 app.get('/admin/coupons',requireManager,async(req,res)=>{const editId=validId(req.query.edit)?Number(req.query.edit):null;const [coupons,editCoupon]=await Promise.all([listCoupons(),editId?getCouponById(editId):null]);render(res,'admin/coupons',{coupons,editCoupon,error:null});});

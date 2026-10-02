@@ -227,7 +227,7 @@ test('per-product discount is isolated: setting one product never creates a stor
   assert.doesNotMatch(server, /getAutomaticDiscountPercent/);
 });
 
-test('live checkout is blocked until payment and required business identity/policies are configured', () => {
+test('cash checkout still requires business identity and customer policies while Stripe remains optional', () => {
   const server = read('src/server.js');
   const settings = read('views/admin/settings.ejs');
   const checkout = read('views/checkout.ejs');
@@ -238,10 +238,11 @@ test('live checkout is blocked until payment and required business identity/poli
   assert.match(server, /terms_policy/);
   assert.match(server, /shipping_policy/);
   assert.match(server, /returns_policy/);
-  assert.match(server, /stripeEnabled\(\)/);
+  assert.match(server, /paymentMode==='cash_on_delivery'\|\|\(stripeEnabled\(\)&&emailEnabled\(\)\)/);
   assert.match(settings, /name="businessPhone"/);
   assert.match(settings, /name="enterpriseNumber"/);
-  assert.match(checkout, /Place order — payment required/);
+  assert.match(checkout, /Place cash-on-delivery order/);
+  assert.match(checkout, /Place order — pay online/);
 });
 
 

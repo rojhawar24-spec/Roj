@@ -231,6 +231,62 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     const renderedPage = await fetch(`${base}${route}`, { headers: { cookie: managerCookie } });
     assert.equal(renderedPage.status,200,`${route} should render with a product in the catalog`);
   }
+  const cashSettings={
+    payment_mode:'cash_on_delivery',support_email:'support@example.test',business_phone:'+32 400 00 00',enterprise_number:'0123456789',
+    legal_name:'Test Shop BV',business_address:'1 Test Street, Brussels',prices_include_tax:'1',shipping_fee_cents:'0',
+    privacy_policy:'We use customer information only to fulfil orders and provide requested support.',
+    terms_policy:'Orders are paid in cash to the manager when goods are delivered to the customer.',
+    shipping_policy:'The manager contacts customers to arrange local delivery of available products.',
+    returns_policy:'Customers can contact the store within fourteen days to discuss returns or issues.'
+  };
+  await Promise.all(Object.entries(cashSettings).map(([key,value])=>data.setSetting(key,value)));
+  const cashSettingsPage=await fetch(`${base}/admin/settings`,{headers:{cookie:managerCookie}});
+  assert.equal(cashSettingsPage.status,200);
+  assert.match(await cashSettingsPage.text(),/Cash on delivery selected/);
+  const cashCheckoutPage=await fetch(`${base}/checkout`,{headers:{cookie:managerCookie}});
+  assert.equal(cashCheckoutPage.status,200);
+  const cashCheckoutHtml=await cashCheckoutPage.text();
+  assert.match(cashCheckoutHtml,/Pay cash to the manager when your order is delivered/);
+  assert.match(cashCheckoutHtml,/Place cash-on-delivery order/);
+  assert.doesNotMatch(cashCheckoutHtml,/Checkout is not live yet/);
+  const cashCsrf=cashCheckoutHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
+  const cashIdempotencyKey=cashCheckoutHtml.match(/name="idempotencyKey" value="([^"]+)"/)?.[1];
+  const placedCashOrder=await fetch(`${base}/checkout`,{
+    method:'POST',headers:{cookie:managerCookie,'content-type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({_csrf:cashCsrf,idempotencyKey:cashIdempotencyKey,customerPhone:'+32 400 00 00',shippingName:'Customer Test',shippingAddress:'1 Test Street',shippingCity:'Brussels',shippingPostalCode:'1000',shippingCountry:'Belgium',termsAccepted:'on'}),
+    redirect:'manual'
+  });
+  assert.equal(placedCashOrder.status,303);
+  const cashOrderId=Number(placedCashOrder.headers.get('location')?.match(/order=(\d+)/)?.[1]);
+  assert.ok(cashOrderId>0);
+  const placedOrder=await data.getOrder(cashOrderId);
+  assert.equal(placedOrder.status,'pending');
+  assert.equal(placedOrder.payment_provider,'cash_on_delivery');
+  assert.equal(placedOrder.reservation_expires_at!==null,true);
+  assert.equal(await data.markOrderPaid(cashOrderId,'stripe-session-must-not-pay-cash-order'),false);
+  assert.equal(Number((await data.getDashboardStats()).orders.revenue),0);
+  const orderConfirmation=await fetch(`${base}${placedCashOrder.headers.get('location')}`,{headers:{cookie:managerCookie}});
+  assert.match(await orderConfirmation.text(),/Pay cash when your order arrives/);
+  const pendingInventory=await db.execute({sql:'SELECT stock,reserved_stock FROM products WHERE id=?',args:[createdProduct.id]});
+  assert.equal(Number(pendingInventory.rows[0].stock),2);
+  assert.equal(Number(pendingInventory.rows[0].reserved_stock),1);
+  const cashManagerPage=await fetch(`${base}/admin/orders/${cashOrderId}`,{headers:{cookie:managerCookie}});
+  assert.equal(cashManagerPage.status,200);
+  assert.match(await cashManagerPage.text(),/Accept order/);
+  for(const status of ['processing','shipped','completed']){
+    const updated=await fetch(`${base}/admin/orders/status`,{
+      method:'POST',headers:{cookie:managerCookie,'content-type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({_csrf:cashCsrf,id:String(cashOrderId),status}),redirect:'manual'
+    });
+    assert.equal(updated.status,303);
+  }
+  const completedCashOrder=await data.getOrder(cashOrderId);
+  assert.equal(completedCashOrder.status,'completed');
+  assert.equal(completedCashOrder.payment_reference,`cash_received:${cashOrderId}`);
+  const settledInventory=await db.execute({sql:'SELECT stock,reserved_stock FROM products WHERE id=?',args:[createdProduct.id]});
+  assert.equal(Number(settledInventory.rows[0].stock),1);
+  assert.equal(Number(settledInventory.rows[0].reserved_stock),0);
+  assert.equal(Number((await data.getDashboardStats()).orders.revenue),1234);
   const uploadedImage = await fetch(`${base}${createdProduct.image_url}`);
   assert.equal(uploadedImage.status,200);
   assert.equal(uploadedImage.headers.get('content-type'),'image/png');

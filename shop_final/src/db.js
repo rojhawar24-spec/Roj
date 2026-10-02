@@ -204,6 +204,7 @@ const escapeLike = value => String(value ?? '').replace(/!/g,'!!').replace(/%/g,
 if (!await getRow('SELECT 1 FROM settings WHERE key=?',['store_name'])) await upsertSetting('store_name', process.env.STORE_NAME || 'ShopEasy');
 if (!await getRow('SELECT 1 FROM settings WHERE key=?',['currency'])) await upsertSetting('currency', process.env.STORE_CURRENCY || 'EUR');
 if (!await getRow('SELECT 1 FROM settings WHERE key=?',['ai_enabled'])) await upsertSetting('ai_enabled', '0');
+if (!await getRow('SELECT 1 FROM settings WHERE key=?',['payment_mode'])) await upsertSetting('payment_mode',process.env.CHECKOUT_PAYMENT_MODE==='stripe'?'stripe':'cash_on_delivery');
 
 if (process.env.SEED_DEMO_DATA === 'true' && Number((await getRow('SELECT COUNT(*) AS c FROM categories')).c) === 0) {
   for (const name of ['New arrivals', 'Electronics', 'Fashion', 'Home', 'Beauty']) await run('INSERT INTO categories(name,slug) VALUES(?,?)',[name,slugify(name)]);
@@ -266,7 +267,7 @@ export async function listCustomers({limit=50, offset=0, search=''}={}) {
   const conditions=["u.role='customer'"];
   if(search){ const like=`%${escapeLike(String(search).trim().slice(0,120))}%`; conditions.push("(u.email LIKE @likeSearch ESCAPE '!')"); params.likeSearch=like; }
   params.limit=Math.min(Math.max(Number(limit)||50,1),200); params.offset=Math.max(Number(offset)||0,0);
-  return getRows(`SELECT u.id,u.email,u.created_at,COUNT(o.id) AS order_count,COALESCE(SUM(CASE WHEN o.status IN ('paid','processing','shipped','completed') THEN o.total_cents ELSE 0 END),0) AS lifetime_value_cents,
+  return getRows(`SELECT u.id,u.email,u.created_at,COUNT(o.id) AS order_count,COALESCE(SUM(CASE WHEN o.status IN ('paid','processing','shipped','completed') AND (o.payment_provider<>'cash_on_delivery' OR o.payment_reference LIKE 'cash_received:%') THEN o.total_cents ELSE 0 END),0) AS lifetime_value_cents,
     (SELECT o2.customer_phone FROM orders o2 WHERE o2.user_id=u.id AND o2.customer_phone<>'' ORDER BY o2.created_at DESC LIMIT 1) AS phone,
     (SELECT o3.shipping_city FROM orders o3 WHERE o3.user_id=u.id ORDER BY o3.created_at DESC LIMIT 1) AS last_city,
     (SELECT o4.shipping_country FROM orders o4 WHERE o4.user_id=u.id ORDER BY o4.created_at DESC LIMIT 1) AS last_country
@@ -279,7 +280,7 @@ export async function countCustomers(search='') {
 export async function getDashboardStats() {
   const [products,orders,customers,stories] = await Promise.all([
     getRow('SELECT COUNT(*) AS total, SUM(CASE WHEN active=1 THEN 1 ELSE 0 END) AS active, SUM(CASE WHEN active=1 AND stock-reserved_stock<=0 THEN 1 ELSE 0 END) AS sold_out FROM products'),
-    getRow(`SELECT COUNT(*) AS total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, COALESCE(SUM(CASE WHEN status IN ('paid','processing','shipped','completed') THEN total_cents ELSE 0 END),0) AS revenue FROM orders`),
+    getRow(`SELECT COUNT(*) AS total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, COALESCE(SUM(CASE WHEN status IN ('paid','processing','shipped','completed') AND (payment_provider<>'cash_on_delivery' OR payment_reference LIKE 'cash_received:%') THEN total_cents ELSE 0 END),0) AS revenue FROM orders`),
     getRow("SELECT COUNT(*) AS total FROM users WHERE role='customer'"),
     getRow("SELECT COUNT(*) AS total, SUM(CASE WHEN active=1 AND datetime(published_at)<=datetime('now') AND datetime(expires_at)>=datetime('now') THEN 1 ELSE 0 END) AS live FROM stories")
   ]);
@@ -367,7 +368,7 @@ export async function countOrders({search='',status=''}={}) {
   return Number((await getRow(`SELECT COUNT(*) AS c FROM orders o ${where}`,params)).c||0);
 }
 export async function getOrderByClientToken(token) { return getRow('SELECT * FROM orders WHERE client_token=?',[token]); }
-export async function saveCheckoutSession(orderId, sessionId, paymentUrl) { return (await run("UPDATE orders SET payment_reference=?,payment_url=?,updated_at=datetime('now') WHERE id=? AND status='pending'",[sessionId,paymentUrl,orderId])).changes===1; }
+export async function saveCheckoutSession(orderId, sessionId, paymentUrl) { return (await run("UPDATE orders SET payment_reference=?,payment_url=?,updated_at=datetime('now') WHERE id=? AND status='pending' AND payment_provider='stripe'",[sessionId,paymentUrl,orderId])).changes===1; }
 export async function markConfirmationEmailSent(orderId) { return (await run("UPDATE orders SET confirmation_email_sent_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND confirmation_email_sent_at IS NULL",[orderId])).changes===1; }
 export async function getOrder(id) { const order = await getRow('SELECT * FROM orders WHERE id=?',[id]); if (!order) return null; order.items = await getRows('SELECT * FROM order_items WHERE order_id=?',[id]); return order; }
 export async function listUserOrders(userId, limit=200) { return getRows('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT ?',[userId, Math.min(Math.max(Number(limit)||200,1),500)]); }
@@ -452,7 +453,7 @@ export async function createOrderAtomic({userId, email, customerPhone='', items,
 export async function markOrderPaid(id, paymentReference) {
   const tx = await db.transaction('write');
   try {
-    const order = await getRow("SELECT * FROM orders WHERE id=? AND status='pending'",[id],tx);
+    const order = await getRow("SELECT * FROM orders WHERE id=? AND status='pending' AND payment_provider='stripe'",[id],tx);
     if (!order) { await tx.rollback(); return false; }
     const items = await getRows('SELECT * FROM order_items WHERE order_id=?',[id],tx);
     for (const item of items) {
@@ -483,7 +484,25 @@ export async function cancelPendingOrder(id) {
   }
 }
 
+async function completeCashOnDeliveryOrder(id) {
+  const tx=await db.transaction('write');
+  try {
+    const order=await getRow("SELECT * FROM orders WHERE id=? AND status='shipped' AND payment_provider='cash_on_delivery'",[id],tx);
+    if(!order){await tx.rollback();return false;}
+    const items=await getRows('SELECT * FROM order_items WHERE order_id=?',[id],tx);
+    for(const item of items){
+      if((await run("UPDATE products SET stock=stock-?,reserved_stock=reserved_stock-?,updated_at=datetime('now') WHERE id=? AND stock>=? AND reserved_stock>=?",[item.quantity,item.quantity,item.product_id,item.quantity,item.quantity],tx)).changes!==1) throw new Error('STOCK_INTEGRITY');
+    }
+    const paymentReference=`cash_received:${id}`;
+    if((await run("UPDATE orders SET status='completed',payment_reference=?,reservation_expires_at=NULL,updated_at=datetime('now') WHERE id=? AND status='shipped'",[paymentReference,id],tx)).changes!==1) throw new Error('ORDER_STATUS_CHANGED');
+    await tx.commit();
+    return true;
+  } catch(error) { await tx.rollback(); throw error; }
+}
+
 export async function setOrderStatus(id,status) {
+  const order=await getRow('SELECT status,payment_provider FROM orders WHERE id=?',[id]);
+  const current=order?.status;
   const allowed = {
     paid: new Set(['processing']),
     processing: new Set(['shipped']),
@@ -492,9 +511,14 @@ export async function setOrderStatus(id,status) {
     cancelled: new Set(),
     pending: new Set(['cancelled'])
   };
-  const current = (await getRow('SELECT status FROM orders WHERE id=?',[id]))?.status;
-  if (!current || !allowed[current]?.has(status)) return false;
+  if (!current) return false;
+  if(current==='pending'&&status==='processing') {
+    if(order.payment_provider!=='cash_on_delivery') return false;
+    return (await run("UPDATE orders SET status='processing',reservation_expires_at=NULL,updated_at=datetime('now') WHERE id=? AND status='pending' AND payment_provider='cash_on_delivery'",[id])).changes===1;
+  }
+  if (!allowed[current]?.has(status)) return false;
   if (current === 'pending' && status === 'cancelled') return cancelPendingOrder(id);
+  if(current==='shipped'&&status==='completed'&&order.payment_provider==='cash_on_delivery') return completeCashOnDeliveryOrder(id);
   const changed = (await run("UPDATE orders SET status=?,updated_at=datetime('now') WHERE id=? AND status=?",[status,id,current]));
   return changed.changes === 1;
 }
