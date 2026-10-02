@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "shop_final/api/index.js",
+      "use": "@vercel/node",
+      "config": { "includeFiles": ["shop_final/views/**", "shop_final/public/**"] }
+    }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "/shop_final/api/index.js" }
+  ]
+}
