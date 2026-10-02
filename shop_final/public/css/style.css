@@ -636,3 +636,30 @@ tbody tr:last-child td { border-bottom: 0; }
 .checkout-essentials { padding: 12px 14px; border: 1px solid #dbe2ec; border-radius: 13px; background: #f8fafc; color: #334155; font-size: 11px; line-height: 1.65; }
 .print-actions { margin: 10px 0 0; }
 @media print { body { background: #fff; } .site-header, .announcement, .site-footer, .mobile-bottom-nav, .print-actions { display:none !important; } .container { width:100%; } .panel { box-shadow:none !important; border-color:#d7dde7 !important; } }
+
+/* Manager interface refinements */
+.admin-nav { position: sticky; top: 8px; z-index: 40; backdrop-filter: blur(8px); }
+.admin-nav a { transition: background .18s ease, color .18s ease; }
+.admin-nav a:focus-visible { outline: 3px solid rgba(79,99,232,.35); outline-offset: 2px; }
+.admin-nav a.active { box-shadow: 0 4px 12px rgba(11,18,32,.22); }
+.stat-card strong { font-size: clamp(28px, 3vw, 37px); }
+.stat-card:first-child { border-top: 3px solid var(--accent); }
+.stat-card small.trend-up { color: var(--accent-dark); font-weight: 800; }
+.stat-card small.trend-warn { color: var(--warning); font-weight: 800; }
+.flow-card { transition: transform .18s ease, box-shadow .18s ease; }
+.flow-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.admin-filters label, .form-stack label { letter-spacing: .01em; }
+.form-stack input:invalid:not(:placeholder-shown), .form-stack textarea:invalid:not(:placeholder-shown) { border-color: var(--danger); box-shadow: 0 0 0 4px rgba(217,45,32,.08); }
+.table-wrap thead th { position: sticky; top: 0; z-index: 1; }
+tbody tr { transition: background .15s ease; }
+tbody tr:hover { background: #f3f6fb; }
+.empty.compact { padding: 26px 12px; text-align: center; }
+.action-chip { display: inline-flex; padding: 4px 9px; border-radius: 999px; font-size: 10px; font-weight: 850; background: #eef1f6; color: #3b4658; }
+.action-create { background: var(--accent-soft); color: var(--accent-dark); }
+.action-update { background: var(--blue-soft); color: #3948a6; }
+.action-danger { background: var(--danger-soft); color: var(--danger); }
+@media (max-width: 760px) {
+  .admin-nav { top: 0; border-radius: 0 0 14px 14px; }
+  .admin-grid { grid-template-columns: 1fr; }
+  .pagination { gap: 8px; }
+}
