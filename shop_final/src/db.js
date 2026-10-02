@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_provider TEXT NOT NULL DEFAULT 'stripe',
   payment_reference TEXT,
   client_token TEXT UNIQUE,
+  guest_access_token_hash TEXT,
   subtotal_cents INTEGER NOT NULL CHECK(subtotal_cents >= 0),
   automatic_discount_cents INTEGER NOT NULL DEFAULT 0 CHECK(automatic_discount_cents >= 0),
   discount_cents INTEGER NOT NULL DEFAULT 0 CHECK(discount_cents >= 0),
@@ -177,6 +178,7 @@ const forwardMigrations = [
   { table:'orders', column:'customer_note', sql:"ALTER TABLE orders ADD COLUMN customer_note TEXT NOT NULL DEFAULT ''" },
   { table:'orders', column:'terms_accepted_at', sql:'ALTER TABLE orders ADD COLUMN terms_accepted_at TEXT' },
   { table:'orders', column:'payment_url', sql:'ALTER TABLE orders ADD COLUMN payment_url TEXT' },
+  { table:'orders', column:'guest_access_token_hash', sql:'ALTER TABLE orders ADD COLUMN guest_access_token_hash TEXT' },
   { table:'orders', column:'confirmation_email_sent_at', sql:'ALTER TABLE orders ADD COLUMN confirmation_email_sent_at TEXT' },
   { table:'products', column:'automatic_discount_percent', sql:'ALTER TABLE products ADD COLUMN automatic_discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(automatic_discount_percent >= 0 AND automatic_discount_percent <= 90)' }
 ];
@@ -392,7 +394,7 @@ export async function releaseExpiredReservations() {
   for (const order of expired) await cancelPendingOrder(order.id);
 }
 
-export async function createOrderAtomic({userId, email, customerPhone='', items, shipping, shippingCents=0, customerNote='', currency='EUR', coupon=null, paymentProvider='stripe', clientToken, termsAcceptedAt, reservationMinutes=60}) {
+export async function createOrderAtomic({userId, email, guestAccessTokenHash=null, customerPhone='', items, shipping, shippingCents=0, customerNote='', currency='EUR', coupon=null, paymentProvider='stripe', clientToken, termsAcceptedAt, reservationMinutes=60}) {
   if (!Array.isArray(items) || items.length === 0) throw new Error('EMPTY_CART');
   if (!/^[A-Za-z0-9_-]{24,100}$/.test(clientToken || '')) throw new Error('INVALID_IDEMPOTENCY');
   const grouped = new Map();
@@ -436,7 +438,7 @@ export async function createOrderAtomic({userId, email, customerPhone='', items,
     const note=String(customerNote||'').slice(0,500);
     const phone=String(customerPhone||'').trim().slice(0,32);
     if(!/^\+?[0-9 ()-]{7,32}$/.test(phone)) throw new Error('INVALID_PHONE');
-    const info = await run(`INSERT INTO orders(user_id,email,customer_phone,status,payment_provider,client_token,subtotal_cents,automatic_discount_cents,discount_cents,total_cents,currency,shipping_name,shipping_address,shipping_city,shipping_postal_code,shipping_country,shipping_cents,customer_note,terms_accepted_at,reservation_expires_at,payment_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[userId,email,phone,'pending',paymentProvider,clientToken,subtotal,automaticDiscount,discount,total,currency,shipping.name,shipping.address,shipping.city,shipping.postalCode,shipping.country,safeShippingCents,note,termsAcceptedAt,reservationExpires,null],tx);
+    const info = await run(`INSERT INTO orders(user_id,email,customer_phone,status,payment_provider,client_token,guest_access_token_hash,subtotal_cents,automatic_discount_cents,discount_cents,total_cents,currency,shipping_name,shipping_address,shipping_city,shipping_postal_code,shipping_country,shipping_cents,customer_note,terms_accepted_at,reservation_expires_at,payment_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[userId,email,phone,'pending',paymentProvider,clientToken,guestAccessTokenHash,subtotal,automaticDiscount,discount,total,currency,shipping.name,shipping.address,shipping.city,shipping.postalCode,shipping.country,safeShippingCents,note,termsAcceptedAt,reservationExpires,null],tx);
     const orderId = Number(info.lastInsertRowid);
     for (const line of normalized) {
       if ((await run("UPDATE products SET reserved_stock=reserved_stock+?,updated_at=datetime('now') WHERE id=? AND stock-reserved_stock>=?",[line.quantity,line.product.id,line.quantity],tx)).changes !== 1) throw new Error('INSUFFICIENT_STOCK');

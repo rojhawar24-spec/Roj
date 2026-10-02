@@ -180,6 +180,13 @@ function localRedirect(req,res,fallback='/') {
   return res.redirect(303,fallback);
 }
 function safeNavigationTarget(value, fallback='/account') { const target=cleanText(value,200); return isSafeLocalPath(target) ? target : fallback; }
+function guestOrderCookieName(orderId) { return `guest_order_${Number(orderId)}`; }
+function guestOrderTokenMatches(order,token) {
+  const stored=Buffer.from(String(order?.guest_access_token_hash||''),'hex');
+  if(stored.length!==32||!token) return false;
+  const supplied=crypto.createHash('sha256').update(String(token)).digest();
+  return crypto.timingSafeEqual(stored,supplied);
+}
 async function aiIsEnabled() {
   return Boolean((await getSetting('ai_enabled','0')) === '1' && aiService?.aiEnabled?.());
 }
@@ -417,29 +424,39 @@ app.post('/account/security',loginLimiter,requireAuth,async(req,res)=>{
 
 app.get('/account/order/:id',requireAuth,async(req,res)=>{const order=await getOrder(Number(req.params.id));if(!order||order.user_id!==req.user.id)return res.status(404).render('error',{title:'Order not found',message:'This order is not available.'});render(res,'order',{order});});
 
-app.get('/checkout',requireAuth,async(req,res)=>{
+app.get('/checkout',async(req,res)=>{
   const summary=await cartSummary(req);
   if(!summary.items.length) return res.redirect('/cart');
   const launch=await storeLaunchConfig();
-  render(res,'checkout',{summary,paymentMode:launch.paymentMode,error:launch.ready?null:'The manager must finish business identity, tax and customer-policy setup before accepting orders.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
+  if(launch.paymentMode==='stripe'&&!req.user) return res.redirect('/login?next=%2Fcheckout');
+  const guestAccessToken=!req.user?crypto.randomBytes(32).toString('base64url'):'';
+  render(res,'checkout',{summary,paymentMode:launch.paymentMode,customerEmail:req.user?.email||'',guestAccessToken,error:launch.ready?null:'The manager must finish business identity, tax and customer-policy setup before accepting orders.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
 });
-app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
+app.post('/checkout',checkoutLimiter,async(req,res)=>{
   const summary=await cartSummary(req);
   if(!summary.items.length) return res.redirect(303,'/cart');
   const launch=await storeLaunchConfig();
-  if(!launch.ready) return render(res,'checkout',{summary,paymentMode:launch.paymentMode,error:'The manager must complete business identity, tax and customer policies before accepting orders.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
-  if(launch.paymentMode==='stripe'&&!stripeEnabled()) return render(res,'checkout',{summary,paymentMode:launch.paymentMode,error:'Online payments are not configured yet. Choose cash on delivery or configure Stripe in manager settings.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
-  const email=req.user.email.toLowerCase();
+  if(launch.paymentMode==='stripe'&&!req.user) return res.redirect(303,'/login?next=%2Fcheckout');
+  const email=cleanText(req.body.customerEmail||req.user?.email,120).toLowerCase();
+  const guestAccessToken=launch.paymentMode==='cash_on_delivery'&&!req.user?String(req.body.guestAccessToken||''):'';
+  const guestAccessTokenHash=guestAccessToken?crypto.createHash('sha256').update(guestAccessToken).digest('hex'):null;
+  const checkoutView={summary,paymentMode:launch.paymentMode,customerEmail:email,guestAccessToken,idempotencyKey:cleanText(req.body.idempotencyKey,100)||crypto.randomBytes(24).toString('base64url')};
+  if(!launch.ready) return render(res,'checkout',{...checkoutView,error:'The manager must complete business identity, tax and customer policies before accepting orders.'});
+  if(launch.paymentMode==='stripe'&&!stripeEnabled()) return render(res,'checkout',{...checkoutView,error:'Online payments are not configured yet. Configure Stripe in manager settings.'});
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).render('checkout',{...checkoutView,error:'Enter a valid email address so the manager can contact you about this order.'});
+  if(launch.paymentMode==='cash_on_delivery'&&!req.user&&!/^[A-Za-z0-9_-]{40,50}$/.test(guestAccessToken)) return res.status(400).render('checkout',{...checkoutView,error:'Refresh checkout and try again.'});
   const customerPhone=cleanText(req.body.customerPhone,32);
   const country=cleanText(req.body.shippingCountry,80);
   const shipping={name:cleanText(req.body.shippingName,120),address:cleanText(req.body.shippingAddress,200),city:cleanText(req.body.shippingCity,100),postalCode:cleanText(req.body.shippingPostalCode,20),country};
   const termsAccepted=req.body.termsAccepted==='on';
   const customerNote=cleanText(req.body.customerNote,500);
-  if(!/^\+?[0-9 ()-]{7,32}$/.test(customerPhone)||country.length<2||country.length>80||Object.values(shipping).some(v=>!v)||!termsAccepted) return render(res,'checkout',{summary,error:'Enter a valid phone number, complete every required delivery field and accept the store terms before continuing.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
+  if(!/^\+?[0-9 ()-]{7,32}$/.test(customerPhone)||country.length<2||country.length>80||Object.values(shipping).some(v=>!v)||!termsAccepted) return render(res,'checkout',{...checkoutView,error:'Enter a valid phone number, complete every required delivery field and accept the store terms before continuing.'});
   let idem=cleanText(req.body.idempotencyKey,100);
-  if(!/^[A-Za-z0-9_-]{24,100}$/.test(idem)) return render(res,'checkout',{summary,error:'Please retry the checkout.',idempotencyKey:crypto.randomBytes(24).toString('base64url')});
+  if(!/^[A-Za-z0-9_-]{24,100}$/.test(idem)) return render(res,'checkout',{...checkoutView,error:'Please refresh and retry this checkout.'});
   let prior=await getOrderByClientToken(idem);
-  if(prior && prior.user_id===req.user.id){
+  const ownsPrior=Boolean(prior&&(req.user?prior.user_id===req.user.id:prior.user_id==null&&prior.guest_access_token_hash===guestAccessTokenHash));
+  if(prior&&!ownsPrior){idem=crypto.randomBytes(24).toString('base64url');prior=null;}
+  if(prior&&ownsPrior){
     if(['paid','processing','shipped','completed'].includes(prior.status)) return res.redirect(303,`/checkout/success?order=${prior.id}`);
     const reservationExpired=prior.status==='pending' && prior.reservation_expires_at && new Date(prior.reservation_expires_at)<=new Date();
     if(reservationExpired){
@@ -453,7 +470,10 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
         return Boolean(current) && current.quantity===item.quantity;
       });
       if(sameItems){
-        if(prior.payment_provider==='cash_on_delivery') return res.redirect(303,`/checkout/success?order=${prior.id}`);
+        if(prior.payment_provider==='cash_on_delivery') {
+          if(guestAccessToken) res.cookie(guestOrderCookieName(prior.id),guestAccessToken,{httpOnly:true,sameSite:'lax',secure:isProd,path:'/checkout/success',maxAge:1000*60*60*24*7});
+          return res.redirect(303,`/checkout/success?order=${prior.id}`);
+        }
         if(prior.payment_url) return res.redirect(303,prior.payment_url);
         try {
           const checkoutItems=existing.items.map(item=>({product:{name:item.product_name},quantity:item.quantity,unit:item.unit_price_cents}));
@@ -475,16 +495,19 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
       idem=crypto.randomBytes(24).toString('base64url');
       prior=null;
     }
-    if(prior?.status==='pending' && prior.user_id===req.user.id && !prior.payment_reference) await cancelPendingOrder(prior.id);
+    if(prior?.status==='pending' && req.user && prior.user_id===req.user.id && !prior.payment_reference) await cancelPendingOrder(prior.id);
     prior=null;
   }
   let created;
   try {
     const currency=await getSetting('currency','EUR');
     const paymentProvider=launch.paymentMode==='cash_on_delivery'?'cash_on_delivery':'stripe';
-    created=await createOrderAtomic({userId:req.user.id,email,customerPhone,items:summary.items,coupon:summary.coupon?.code||null,currency,shipping,shippingCents:summary.shipping,customerNote,paymentProvider,clientToken:idem,termsAcceptedAt:new Date().toISOString(),reservationMinutes:paymentProvider==='cash_on_delivery'?1440:checkoutReservationMinutes});
-    await createAudit(req.user.id,'order_created','order',created.orderId,{total:created.total,paymentProvider});
-    if(paymentProvider==='cash_on_delivery') return res.redirect(303,`/checkout/success?order=${created.orderId}`);
+    created=await createOrderAtomic({userId:req.user?.id||null,guestAccessTokenHash,email,customerPhone,items:summary.items,coupon:summary.coupon?.code||null,currency,shipping,shippingCents:summary.shipping,customerNote,paymentProvider,clientToken:idem,termsAcceptedAt:new Date().toISOString(),reservationMinutes:paymentProvider==='cash_on_delivery'?1440:checkoutReservationMinutes});
+    await createAudit(req.user?.id||null,'order_created','order',created.orderId,{total:created.total,paymentProvider});
+    if(paymentProvider==='cash_on_delivery') {
+      if(guestAccessToken) res.cookie(guestOrderCookieName(created.orderId),guestAccessToken,{httpOnly:true,sameSite:'lax',secure:isProd,path:'/checkout/success',maxAge:1000*60*60*24*7});
+      return res.redirect(303,`/checkout/success?order=${created.orderId}`);
+    }
     const checkout=await createStripeCheckout({orderId:created.orderId,amountCents:created.total,discountCents:created.discount,shippingCents:created.shipping,currency,email,items:created.items,reservationExpires:created.reservationExpires});
     if (!await saveCheckoutSession(created.orderId,checkout.id,checkout.url)) {
       const fresh=await getOrder(created.orderId);
@@ -500,11 +523,14 @@ app.post('/checkout',checkoutLimiter,requireAuth,async(req,res)=>{
     return render(res,'checkout',{summary,error:messages[err.message]||'Checkout could not be completed. Please try again.',idempotencyKey:created?idem:crypto.randomBytes(24).toString('base64url')});
   }
 });
-app.get('/checkout/success',requireAuth,async(req,res)=>{
+app.get('/checkout/success',async(req,res)=>{
   const order=await getOrder(Number(req.query.order));
-  if(!order||order.user_id!==req.user.id)return res.status(404).render('error',{title:'Order not found',message:'This order could not be found.'});
+  if(!order)return res.status(404).render('error',{title:'Order not found',message:'This order could not be found.'});
+  const isGuestOrder=!order.user_id&&order.payment_provider==='cash_on_delivery'&&guestOrderTokenMatches(order,req.cookies?.[guestOrderCookieName(order.id)]);
+  const isOwner=Boolean(req.user&&order.user_id===req.user.id);
+  if(!isOwner&&!isGuestOrder)return res.status(404).render('error',{title:'Order not found',message:'This order could not be found.'});
   if(order.status==='paid'||order.status==='processing'||order.status==='shipped'||order.status==='completed'||(order.payment_provider==='cash_on_delivery'&&order.status==='pending')){req.session.cart=[];req.session.coupon=null;await saveSessionCart(req.sessionId,[]);await saveSessionCoupon(req.sessionId,null);}
-  render(res,'success',{order,cancelled:false,waitingForProviderExpiry:false});
+  render(res,'success',{order,cancelled:false,waitingForProviderExpiry:false,isGuestOrder});
 });
 app.get('/checkout/cancel',requireAuth,async(req,res)=>{
   const order=await getOrder(Number(req.query.order));
@@ -513,7 +539,7 @@ app.get('/checkout/cancel',requireAuth,async(req,res)=>{
   const fresh=await getOrder(order.id) || order;
   const stillProviderPending=Boolean(fresh.status==='pending' && fresh.payment_reference);
   const actuallyCancelled=fresh.status==='cancelled';
-  render(res,'success',{order:fresh,cancelled:actuallyCancelled,waitingForProviderExpiry:stillProviderPending});
+  render(res,'success',{order:fresh,cancelled:actuallyCancelled,waitingForProviderExpiry:stillProviderPending,isGuestOrder:false});
 });
 
 app.post('/api/ai/search-assistant',aiLimiter,async(req,res)=>{
