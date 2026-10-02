@@ -3093,17 +3093,18 @@ h1,h2,h3,.brand-word {
   .brand-logo { width: 32px; height: 32px; }
   .brand-word { font-size: 15px; }
   .menu-toggle { width: 40px; min-height: 40px; border-radius: 7px; }
-  .hero { padding: 30px 0 24px; gap: 22px; }
-  .hero h1 { max-width: 12ch; margin: 10px 0 12px; font-size: 40px; line-height: 1.08; }
-  .hero-text { font-size: 14px; line-height: 1.6; }
-  .hero-micro { font-size: 10px; margin-top: 16px; }
-  .hero-stage { min-height: 0; padding: 16px; border-radius: 8px; }
+  .hero { padding: 20px 0 14px; gap: 14px; }
+  .hero h1 { max-width: none; margin: 8px 0 9px; font-size: 34px; line-height: 1.06; }
+  .hero-text { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; line-height: 1.5; }
+  .hero-micro { display: none; }
+  .hero-actions { margin-top: 12px; }
+  .hero-stage { min-height: 0; padding: 12px; border-radius: 8px; }
   .stage-top { font-size: 9px; }
-  .stage-product { position: relative; inset: auto; grid-template-columns: 1fr; gap: 14px; margin-top: 16px; }
-  .stage-image { min-height: 190px; max-height: 230px; border-radius: 6px; }
-  .stage-image img { width: 72%; height: 85%; }
-  .stage-copy { padding: 0 2px 2px; }
-  .stage-copy h2 { margin: 8px 0; font-size: 25px; }
+  .stage-product { position: relative; inset: auto; grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); gap: 12px; align-items: center; margin-top: 10px; }
+  .stage-image { min-height: 138px; max-height: 166px; border-radius: 6px; }
+  .stage-image img { width: 88%; height: 88%; }
+  .stage-copy { min-width: 0; padding: 0 2px; }
+  .stage-copy h2 { margin: 7px 0; font-size: 22px; }
   .stage-copy p { font-size: 12px; }
   .stage-link { margin-top: 10px; }
   .section { padding: 38px 0; }
@@ -3145,7 +3146,7 @@ h1,h2,h3,.brand-word {
 }
 
 @media (max-width: 430px) {
-  .hero h1 { max-width: 11ch; font-size: 36px; }
+  .hero h1 { max-width: none; font-size: 32px; }
   .hero-actions .btn { flex: 1; }
   .category-grid,.trust-row { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .trust-row > div:nth-child(2) { border-right: 0; }
