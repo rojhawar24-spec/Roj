@@ -196,6 +196,18 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   assert.equal(uploadedImage.status,200);
   assert.equal(uploadedImage.headers.get('content-type'),'image/png');
   assert.deepEqual([...new Uint8Array(await uploadedImage.arrayBuffer())],[137,80,78,71,13,10,26,10,0,0,0,0]);
+  const dupForm = new FormData();
+  for (const [key,value] of Object.entries({ _csrf: productCsrf, name: 'Duplicate', sku: productSku, price: '10.00', salePrice: '15.00', automaticDiscountPercent: '0', stock: '3', active: 'on' })) dupForm.set(key,value);
+  const dupResponse = await fetch(`${base}/admin/products/save`, { method: 'POST', headers: { cookie: managerCookie }, body: dupForm, redirect: 'manual' });
+  assert.equal(dupResponse.status, 400);
+  const dupHtml = await dupResponse.text();
+  assert.match(dupHtml, /Sale price must be greater than 0 and lower than the regular price/);
+  assert.match(dupHtml, /name="price"[^>]*value="10.00"/);
+  assert.match(dupHtml, /name="stock"[^>]*value="3"/);
+  dupForm.set('salePrice','');
+  const skuResponse = await fetch(`${base}/admin/products/save`, { method: 'POST', headers: { cookie: managerCookie }, body: dupForm, redirect: 'manual' });
+  assert.equal(skuResponse.status, 400);
+  assert.match(await skuResponse.text(), /SKU is already used/);
   await db.execute({ sql: 'DELETE FROM uploaded_assets WHERE path=?', args: [createdProduct.image_url] });
   await db.execute({ sql: 'DELETE FROM audit_logs WHERE target_type=? AND target_id=?', args: ['product',String(createdProduct.id)] });
   await data.deleteProduct(Number(createdProduct.id));

@@ -532,7 +532,18 @@ app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf
     previousImage=id?(await getProductById(id))?.image_url||null:null;
     const name=cleanText(req.body.name,120),price=moneyCents(req.body.price),saleText=String(req.body.salePrice||'').trim(),sale=saleText?moneyCents(saleText):null,automaticDiscountPercent=Number(req.body.automaticDiscountPercent);
     const stock=Number(req.body.stock),saleStart=dateTimeLocalToISOString(req.body.saleStart,storeTimeZone),saleEnd=dateTimeLocalToISOString(req.body.saleEnd,storeTimeZone),sku=cleanText(req.body.sku,60);
-    if(!name||price===null||price<=0||saleText&&sale===null||sale!==null&&(sale<=0||sale>=price)||!Number.isInteger(automaticDiscountPercent)||automaticDiscountPercent<0||automaticDiscountPercent>90||!Number.isInteger(stock)||stock<0||stock>100000000||(saleStart&&saleEnd&&new Date(saleEnd)<=new Date(saleStart))||!sku) throw new Error('VALIDATION');
+    const problems=[];
+    if(!name)problems.push('Product name is required.');
+    if(!sku)problems.push('SKU is required.');
+    if(price===null||price<=0)problems.push('Regular price must be a valid amount greater than 0 (for example 89.00).');
+    if(saleText&&sale===null)problems.push('Sale price is not a valid amount (for example 69.00).');
+    else if(sale!==null&&price!==null&&price>0&&(sale<=0||sale>=price))problems.push('Sale price must be greater than 0 and lower than the regular price.');
+    if(!Number.isInteger(automaticDiscountPercent)||automaticDiscountPercent<0||automaticDiscountPercent>90)problems.push('Automatic discount must be a whole number between 0 and 90.');
+    if(!Number.isInteger(stock)||stock<0||stock>100000000)problems.push('Stock must be a whole number of 0 or more.');
+    if(String(req.body.saleStart||'').trim()&&!saleStart)problems.push('Sale start date is not valid.');
+    if(String(req.body.saleEnd||'').trim()&&!saleEnd)problems.push('Sale end date is not valid.');
+    if(saleStart&&saleEnd&&new Date(saleEnd)<=new Date(saleStart))problems.push('Sale end must be after the sale start.');
+    if(problems.length){const e=new Error('VALIDATION');e.problems=problems;throw e;}
     const image=await safeProductImage(req); savedImage=image; if(req.file&&!image)throw new Error('IMAGE');
     const categoryId=validId(req.body.categoryId)?Number(req.body.categoryId):null;
     if(categoryId && !await getRow('SELECT 1 FROM categories WHERE id=?',[categoryId]))throw new Error('CATEGORY');
@@ -543,7 +554,16 @@ app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf
     return res.redirect('/admin/products');
   } catch(err) {
     if(req.file && savedImage) await deleteUploadedAsset(savedImage);
-    return res.status(400).render('admin/product-form',{product:req.body,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:err.message==='RESERVED_STOCK'?'Stock cannot be lower than stock currently reserved in checkout.':'Could not save product. Check the required fields, SKU, price, date and image.'});
+    const msg=String(err?.message||'');
+    let error;
+    if(err.problems)error=err.problems.join(' ');
+    else if(msg==='RESERVED_STOCK')error='Stock cannot be lower than stock currently reserved in checkout.';
+    else if(msg==='IMAGE')error='The image could not be used. Upload a valid JPG, PNG or WebP file up to 5 MB.';
+    else if(msg==='CATEGORY')error='The selected category no longer exists. Choose another category.';
+    else if(/UNIQUE/i.test(msg)&&/sku/i.test(msg))error='This SKU is already used by another product. Choose a different SKU.';
+    else if(/UNIQUE/i.test(msg))error='A product with the same unique value (SKU or name) already exists.';
+    else error='Could not save product. Please check the fields and try again.';
+    return res.status(400).render('admin/product-form',{product:{...req.body,isFormInput:true},categories:await listCategories(),currency:await getSetting('currency','EUR'),error});
   }
 });
 app.get('/admin/products/:id/edit',requireManager,async(req,res)=>{const product=await getProductById(Number(req.params.id));if(!product)return res.status(404).render('error',{title:'Product not found',message:'Product does not exist.'});render(res,'admin/product-form',{product,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null});});
