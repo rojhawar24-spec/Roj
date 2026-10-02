@@ -338,6 +338,13 @@ main { min-height: 54vh; }
 .form-section { padding: 20px 0; border-top: 1px solid var(--line); display: grid; gap: 15px; }
 .form-section:first-of-type { border-top: 0; padding-top: 0; }
 .form-section h2 { margin: 3px 0 0; }
+.form-options { border-top: 1px solid var(--line); padding-top: 14px; }
+.form-options > summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; list-style: none; color: var(--ink); font-size: 12px; }
+.form-options > summary::-webkit-details-marker { display: none; }
+.form-options > summary::after { content: '+'; color: var(--muted); font-size: 18px; }
+.form-options[open] > summary::after { content: '-'; }
+.form-options > summary span { color: var(--muted); font-size: 10px; font-weight: 500; }
+.form-options-content { display: grid; gap: 15px; padding-top: 16px; }
 .tip-box { padding: 13px 15px; border: 1px solid #d9e0ea; border-radius: 13px; background: #f7f9fc; color: #596579; font-size: 11px; line-height: 1.55; }
 .tip-box strong { color: var(--ink); }
 .discount-preview { color: #3448a9; font-size: 10px; }

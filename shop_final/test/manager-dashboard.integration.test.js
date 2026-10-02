@@ -159,13 +159,15 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   assert.equal(productPage.status, 200);
   const productHtml = await productPage.text();
   assert.match(productHtml, /name="salePrice"/);
+  assert.match(productHtml, /SKU \(optional\)/);
+  assert.match(productHtml, /More options/);
   const productCsrf = productHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
-  const productSku = `SMOKE-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+  const productName = 'Temporary manager product';
   const productForm = new FormData();
   for (const [key,value] of Object.entries({
     _csrf: productCsrf,
-    name: 'Temporary manager product',
-    sku: productSku,
+    name: productName,
+    sku: '',
     categoryId: '',
     shortDescription: 'Product flow integration test',
     description: 'Temporary product created and deleted by the integration test.',
@@ -180,6 +182,20 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
     active: 'on'
   })) productForm.set(key,value);
   productForm.set('image',new Blob([Uint8Array.from([137,80,78,71,13,10,26,10,0,0,0,0])],{type:'image/png'}),'smoke.png');
+  const invalidProductForm = new FormData();
+  for (const [key,value] of productForm.entries()) invalidProductForm.append(key,value);
+  invalidProductForm.set('salePrice','99.99');
+  const rejectedProduct = await fetch(`${base}/admin/products/save`, {
+    method: 'POST',
+    headers: { cookie: managerCookie },
+    body: invalidProductForm,
+    redirect: 'manual'
+  });
+  assert.equal(rejectedProduct.status,400);
+  const rejectedHtml = await rejectedProduct.text();
+  assert.match(rejectedHtml,/value="12\.34"/);
+  assert.match(rejectedHtml,/value="99\.99"/);
+  assert.match(rejectedHtml,/Sale price must be greater than zero and lower than the regular price\./);
   const saveProduct = await fetch(`${base}/admin/products/save`, {
     method: 'POST',
     headers: { cookie: managerCookie },
@@ -188,9 +204,10 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   });
   assert.equal(saveProduct.status, 302);
   assert.equal(saveProduct.headers.get('location'), '/admin/products');
-  const productQuery = await db.execute({ sql: 'SELECT id,image_url FROM products WHERE sku=?', args: [productSku] });
+  const productQuery = await db.execute({ sql: 'SELECT id,image_url,sku FROM products WHERE name=?', args: [productName] });
   const createdProduct = productQuery.rows[0];
   assert.ok(createdProduct);
+  assert.match(createdProduct.sku,/^TEMPORARY-MANAGER-PRODUCT(?:-\d+)?$/);
   assert.match(createdProduct.image_url,/^\/uploads\/[a-f0-9]{32}\.png$/);
   const uploadedImage = await fetch(`${base}${createdProduct.image_url}`);
   assert.equal(uploadedImage.status,200);

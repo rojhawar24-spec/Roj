@@ -198,6 +198,15 @@ async function uniqueSlug(base,id=null) {
   while(await getRow('SELECT 1 FROM products WHERE slug=? AND id<>?',[slug,id||0])) slug=`${rootSlug.slice(0,60)}-${n++}`;
   return slug;
 }
+async function uniqueSku(name,id=null) {
+  const base=name.toUpperCase().trim().replace(/[^A-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,50) || 'ITEM';
+  let sku=base,n=2;
+  while(await getRow('SELECT 1 FROM products WHERE LOWER(sku)=LOWER(?) AND id<>?',[sku,id||0])) {
+    const suffix=`-${n++}`;
+    sku=`${base.slice(0,60-suffix.length)}${suffix}`;
+  }
+  return sku;
+}
 async function uniqueCategorySlug(base,id=null) {
   const cleaned=base.toLowerCase().trim().replace(/[^a-z0-9\s-]/g,'').replace(/[\s-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,70);
   const rootSlug=cleaned || `category-${Date.now()}`;
@@ -531,8 +540,16 @@ app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf
     const id=validId(req.body.id)?Number(req.body.id):null;
     previousImage=id?(await getProductById(id))?.image_url||null:null;
     const name=cleanText(req.body.name,120),price=moneyCents(req.body.price),saleText=String(req.body.salePrice||'').trim(),sale=saleText?moneyCents(saleText):null,automaticDiscountPercent=Number(req.body.automaticDiscountPercent);
-    const stock=Number(req.body.stock),saleStart=dateTimeLocalToISOString(req.body.saleStart,storeTimeZone),saleEnd=dateTimeLocalToISOString(req.body.saleEnd,storeTimeZone),sku=cleanText(req.body.sku,60);
-    if(!name||price===null||price<=0||saleText&&sale===null||sale!==null&&(sale<=0||sale>=price)||!Number.isInteger(automaticDiscountPercent)||automaticDiscountPercent<0||automaticDiscountPercent>90||!Number.isInteger(stock)||stock<0||stock>100000000||(saleStart&&saleEnd&&new Date(saleEnd)<=new Date(saleStart))||!sku) throw new Error('VALIDATION');
+    const stock=Number(req.body.stock),saleStart=dateTimeLocalToISOString(req.body.saleStart,storeTimeZone),saleEnd=dateTimeLocalToISOString(req.body.saleEnd,storeTimeZone);
+    let sku=cleanText(req.body.sku,60).toUpperCase();
+    if(!name) throw new Error('NAME');
+    if(price===null||price<=0) throw new Error('PRICE');
+    if(saleText&&(sale===null||sale<=0||sale>=price)) throw new Error('SALE_PRICE');
+    if(!Number.isInteger(automaticDiscountPercent)||automaticDiscountPercent<0||automaticDiscountPercent>90) throw new Error('DISCOUNT');
+    if(!Number.isInteger(stock)||stock<0||stock>100000000) throw new Error('STOCK');
+    if(saleStart&&saleEnd&&new Date(saleEnd)<=new Date(saleStart)) throw new Error('SALE_WINDOW');
+    if(!sku) sku=await uniqueSku(name,id);
+    else if(await getRow('SELECT 1 FROM products WHERE LOWER(sku)=LOWER(?) AND id<>?',[sku,id||0])) throw new Error('SKU_TAKEN');
     const image=await safeProductImage(req); savedImage=image; if(req.file&&!image)throw new Error('IMAGE');
     const categoryId=validId(req.body.categoryId)?Number(req.body.categoryId):null;
     if(categoryId && !await getRow('SELECT 1 FROM categories WHERE id=?',[categoryId]))throw new Error('CATEGORY');
@@ -543,7 +560,8 @@ app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf
     return res.redirect('/admin/products');
   } catch(err) {
     if(req.file && savedImage) await deleteUploadedAsset(savedImage);
-    return res.status(400).render('admin/product-form',{product:req.body,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:err.message==='RESERVED_STOCK'?'Stock cannot be lower than stock currently reserved in checkout.':'Could not save product. Check the required fields, SKU, price, date and image.'});
+    const errors={NAME:'Enter a product name.',PRICE:'Enter a regular price greater than zero.',SALE_PRICE:'Sale price must be greater than zero and lower than the regular price.',DISCOUNT:'Automatic discount must be a whole number from 0 to 90.',STOCK:'Enter a whole stock quantity from 0 to 100,000,000.',SALE_WINDOW:'Sale end must be later than sale start.',SKU_TAKEN:'This SKU is already used by another product. Change it or leave it blank for an automatic SKU.',CATEGORY:'Choose an existing category or select No category.',IMAGE:'Use a valid JPG, PNG or WebP image up to 5 MB.',URL:'Image URL must use a trusted HTTPS address.',RESERVED_STOCK:'Stock cannot be lower than stock currently reserved in checkout.'};
+    return res.status(400).render('admin/product-form',{product:req.body,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:errors[err.message]||'Could not save the product. Your entries are still here; check the highlighted details and try again.'});
   }
 });
 app.get('/admin/products/:id/edit',requireManager,async(req,res)=>{const product=await getProductById(Number(req.params.id));if(!product)return res.status(404).render('error',{title:'Product not found',message:'Product does not exist.'});render(res,'admin/product-form',{product,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null});});
