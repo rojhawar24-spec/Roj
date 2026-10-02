@@ -88,6 +88,18 @@ test('mobile navigation has both the JS toggle and the CSS open-state', () => {
   assert.match(css, /\.nav-links\.open\s*\{[\s\S]*display:\s*flex/);
 });
 
+test('buttons have distinct variants, accessible focus, and polished interaction states', () => {
+  const css = read('public/css/style.css');
+  assert.match(css, /\.btn\s*\{[\s\S]*border-radius:\s*13px;[\s\S]*padding:\s*0 17px;[\s\S]*transition:[^;]*\.24s/);
+  assert.match(css, /\.btn-dark\s*\{[^}]*linear-gradient/);
+  assert.match(css, /\.btn-light:hover:not\(:disabled\)\s*\{[^}]*box-shadow/);
+  assert.match(css, /\.btn-mint:hover:not\(:disabled\)\s*\{[^}]*box-shadow/);
+  assert.match(css, /\.btn-danger:hover:not\(:disabled\)\s*\{[^}]*box-shadow/);
+  assert.match(css, /\.icon-btn:hover:not\(:disabled\)\s*\{[^}]*transform:\s*translateY\(-2px\)/);
+  assert.match(css, /\.btn:disabled,\s*\.icon-btn:disabled\s*\{[^}]*box-shadow:\s*none/);
+  assert.match(css, /\.btn:focus-visible,\s*\.icon-btn:focus-visible\s*\{[^}]*outline:\s*3px/);
+});
+
 test('checkout cancellation only immediately releases a pending reservation when no external payment session exists', () => {
   const server = read('src/server.js');
   assert.match(server, /if\(order\.status==='pending' && !order\.payment_reference\) await cancelPendingOrder\(order\.id\)/);
