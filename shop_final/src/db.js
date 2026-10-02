@@ -153,6 +153,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 
 // Settings writer must exist before startup migrations use it. Keep this declaration
 // immediately after schema creation to avoid a temporal-dead-zone failure at startup.
+const SETTINGS_CACHE_TTL_MS = 5000;
+const settingsCache = new Map();
 const upsertSetting = (key,value) => run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[key,value]);
 
 // Backward-compatible migrations for fields added after the original checkout schema.
@@ -342,9 +344,15 @@ export async function adminCreateOrUpdateCoupon(data) {
   return Number((await run('INSERT INTO coupons(code,type,value,min_subtotal_cents,expires_at,active) VALUES(?,?,?,?,?,?)',values)).lastInsertRowid);
 }
 export async function deleteCoupon(id) { await run('DELETE FROM coupons WHERE id=?',[id]); }
-export async function getSetting(key, fallback='') { return (await getRow('SELECT value FROM settings WHERE key=?',[key]))?.value ?? fallback; }
+export async function getSetting(key, fallback='') {
+  const hit = settingsCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.value ?? fallback;
+  const value = (await getRow('SELECT value FROM settings WHERE key=?',[key]))?.value;
+  settingsCache.set(key, { value, expires: Date.now() + SETTINGS_CACHE_TTL_MS });
+  return value ?? fallback;
+}
 export function getProductDiscountPercent(product) { return normalizeProductDiscountPercent(product?.automatic_discount_percent); }
-export async function setSetting(key, value) { await upsertSetting(key, value); }
+export async function setSetting(key, value) { await upsertSetting(key, value); settingsCache.delete(key); }
 export async function createAudit(userId, action, targetType, targetId, meta={}) { await run('INSERT INTO audit_logs(user_id,action,target_type,target_id,meta_json) VALUES(?,?,?,?,?)',[userId,action,targetType,targetId ? String(targetId) : null,JSON.stringify(meta)]); }
 export async function listAuditLogs(limit=150) { return getRows(`SELECT a.*,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT ?`,[limit]); }
 export async function listOrders({limit=100,offset=0,search='',status=''}={}) {
