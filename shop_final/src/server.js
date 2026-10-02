@@ -524,27 +524,64 @@ app.post('/admin/categories/delete',requireManager,async(req,res)=>{
 });
 app.get('/admin/products',requireManager,async(req,res)=>{const search=cleanText(req.query.search,80),category=cleanText(req.query.category,80),page=Math.max(1,Math.min(Number(req.query.page)||1,1000)),pageSize=50,offset=(page-1)*pageSize;const [total,products,categories]=await Promise.all([countProducts({search,category,onlyActive:false}),listProducts({search,category,onlyActive:false,limit:pageSize,offset}),listCategories()]);render(res,'admin/products',{products,categories,search,category,page,total,hasNext:offset+products.length<total,hasPrev:page>1});});
 app.get('/admin/products/new',requireManager,async(req,res)=>render(res,'admin/product-form',{product:null,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null}));
+function skuFromName(name){return String(name||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40);}
+function formProductFromBody(b){const cents=v=>{const c=moneyCents(v);return c===null?null:c};return {id:b.id,name:b.name,sku:b.sku,category_id:b.categoryId,short_description:b.shortDescription,description:b.description,tags:b.tags,price_cents:cents(b.price),sale_price_cents:String(b.salePrice||'').trim()?cents(b.salePrice):null,sale_start:null,sale_end:null,formSaleStart:b.saleStart,formSaleEnd:b.saleEnd,automatic_discount_percent:b.automaticDiscountPercent,stock:b.stock,image_url:b.imageUrl,featured:b.featured==='on',active:b.active==='on'};}
+app.get('/admin/products/check-sku',requireManager,async(req,res)=>{
+  const sku=cleanText(req.query.sku,60),id=validId(req.query.id)?Number(req.query.id):null;
+  if(!sku)return res.json({ok:false,message:'SKU is required'});
+  const row=await getRow('SELECT id FROM products WHERE sku=?',[sku]);
+  if(row&&Number(row.id)!==id)return res.json({ok:false,message:`SKU must be unique (already used: '${sku}')`});
+  res.json({ok:true,message:'SKU is available'});
+});
 app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf,async(req,res)=>{
   let savedImage=null;
   let previousImage=null;
+  const errors=[];
   try {
     const id=validId(req.body.id)?Number(req.body.id):null;
     previousImage=id?(await getProductById(id))?.image_url||null:null;
-    const name=cleanText(req.body.name,120),price=moneyCents(req.body.price),saleText=String(req.body.salePrice||'').trim(),sale=saleText?moneyCents(saleText):null,automaticDiscountPercent=Number(req.body.automaticDiscountPercent);
-    const stock=Number(req.body.stock),saleStart=dateTimeLocalToISOString(req.body.saleStart,storeTimeZone),saleEnd=dateTimeLocalToISOString(req.body.saleEnd,storeTimeZone),sku=cleanText(req.body.sku,60);
-    if(!name||price===null||price<=0||saleText&&sale===null||sale!==null&&(sale<=0||sale>=price)||!Number.isInteger(automaticDiscountPercent)||automaticDiscountPercent<0||automaticDiscountPercent>90||!Number.isInteger(stock)||stock<0||stock>100000000||(saleStart&&saleEnd&&new Date(saleEnd)<=new Date(saleStart))||!sku) throw new Error('VALIDATION');
-    const image=await safeProductImage(req); savedImage=image; if(req.file&&!image)throw new Error('IMAGE');
+    const name=cleanText(req.body.name,120),priceText=String(req.body.price||'').trim(),price=moneyCents(priceText),saleText=String(req.body.salePrice||'').trim(),sale=saleText?moneyCents(saleText):null;let automaticDiscountPercent=Number(req.body.automaticDiscountPercent);
+    const stockText=String(req.body.stock===undefined||req.body.stock===''?0:req.body.stock),stock=Number(stockText),saleStart=dateTimeLocalToISOString(req.body.saleStart,storeTimeZone),saleEnd=dateTimeLocalToISOString(req.body.saleEnd,storeTimeZone);
+    let sku=cleanText(req.body.sku,60)||skuFromName(name);
+    if(!name)errors.push('Product name is required');
+    if(!priceText)errors.push('Regular price is required');
+    else if(price===null||price<=0)errors.push('Regular price must be a valid amount greater than 0');
+    if(saleText&&sale===null)errors.push('Sale price must be a valid amount');
+    else if(sale!==null&&sale<=0)errors.push('Sale price must be greater than 0');
+    else if(sale!==null&&price!==null&&price>0&&sale>=price)errors.push('Sale price must be lower than regular price');
+    if(req.body.automaticDiscountPercent===undefined||req.body.automaticDiscountPercent==='')automaticDiscountPercent=0;
+    if(!Number.isInteger(automaticDiscountPercent)||automaticDiscountPercent<0||automaticDiscountPercent>90)errors.push('Automatic discount must be a whole number between 0 and 90');
+    if(!Number.isInteger(stock)||stock<0)errors.push('Stock must be at least 0');
+    else if(stock>100000000)errors.push('Stock cannot be higher than 100000000');
+    if(String(req.body.saleStart||'').trim()&&!saleStart)errors.push('Sale start date is not a valid date');
+    if(String(req.body.saleEnd||'').trim()&&!saleEnd)errors.push('Sale end date is not a valid date');
+    if(saleStart&&saleEnd&&new Date(saleEnd)<=new Date(saleStart))errors.push('Sale end date must be after start date');
+    if(!sku)errors.push('SKU is required (enter one or fill in a product name to generate it)');
+    else{const dup=await getRow('SELECT id FROM products WHERE sku=?',[sku]);if(dup&&Number(dup.id)!==id)errors.push(`SKU must be unique (already used: '${sku}')`);}
     const categoryId=validId(req.body.categoryId)?Number(req.body.categoryId):null;
-    if(categoryId && !await getRow('SELECT 1 FROM categories WHERE id=?',[categoryId]))throw new Error('CATEGORY');
-    const data={id,name,slug:await uniqueSlug(name,id),shortDescription:cleanText(req.body.shortDescription,300),description:cleanText(req.body.description,5000),imageUrl:image,priceCents:price,salePriceCents:sale,saleStart,saleEnd,sku,stock,categoryId,tags:cleanText(req.body.tags,300),featured:req.body.featured==='on',active:req.body.active==='on',automaticDiscountPercent};
-    const savedId=await adminCreateOrUpdateProduct(data);
-    await createAudit(req.user.id,id?'product_updated':'product_created','product',savedId,{name:data.name,automaticDiscountPercent:data.automaticDiscountPercent});
-    if(req.file && previousImage && previousImage!==savedImage) await deleteUploadedAsset(previousImage);
-    return res.redirect('/admin/products');
+    if(categoryId && !await getRow('SELECT 1 FROM categories WHERE id=?',[categoryId]))errors.push('Selected category does not exist');
+    if(!errors.length){
+      try{
+        const image=await safeProductImage(req); savedImage=image; if(req.file&&!image)errors.push('Image could not be processed. Use a JPG, PNG or WebP file up to 5 MB');
+        if(!errors.length){
+          const data={id,name,slug:await uniqueSlug(name,id),shortDescription:cleanText(req.body.shortDescription,300),description:cleanText(req.body.description,5000),imageUrl:image,priceCents:price,salePriceCents:sale,saleStart,saleEnd,sku,stock,categoryId,tags:cleanText(req.body.tags,300),featured:req.body.featured==='on',active:req.body.active==='on',automaticDiscountPercent};
+          const savedId=await adminCreateOrUpdateProduct(data);
+          await createAudit(req.user.id,id?'product_updated':'product_created','product',savedId,{name:data.name,automaticDiscountPercent:data.automaticDiscountPercent});
+          if(req.file && previousImage && previousImage!==savedImage) await deleteUploadedAsset(previousImage);
+          return res.redirect('/admin/products');
+        }
+      }catch(err){
+        if(err.message==='URL')errors.push('Image URL must be a safe HTTPS address');
+        else if(err.message==='RESERVED_STOCK')errors.push('Stock cannot be lower than stock currently reserved in checkout');
+        else if(/UNIQUE/i.test(String(err.message)))errors.push(`SKU must be unique (already used: '${sku}')`);
+        else throw err;
+      }
+    }
   } catch(err) {
-    if(req.file && savedImage) await deleteUploadedAsset(savedImage);
-    return res.status(400).render('admin/product-form',{product:req.body,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:err.message==='RESERVED_STOCK'?'Stock cannot be lower than stock currently reserved in checkout.':'Could not save product. Check the required fields, SKU, price, date and image.'});
+    errors.push('Unexpected error while saving the product. Please try again');
   }
+  if(req.file && savedImage) await deleteUploadedAsset(savedImage);
+  return res.status(400).render('admin/product-form',{product:formProductFromBody(req.body),categories:await listCategories(),currency:await getSetting('currency','EUR'),error:errors[0],errors});
 });
 app.get('/admin/products/:id/edit',requireManager,async(req,res)=>{const product=await getProductById(Number(req.params.id));if(!product)return res.status(404).render('error',{title:'Product not found',message:'Product does not exist.'});render(res,'admin/product-form',{product,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null});});
 app.post('/admin/products/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const p=await getProductById(id);if(p?.reserved_stock>0)return res.status(400).render('error',{title:'Product is reserved',message:'This product cannot be deleted while checkout stock is reserved.'});await deleteProduct(id);await deleteUploadedAsset(p?.image_url);await createAudit(req.user.id,'product_deleted','product',id);}res.redirect('/admin/products');});
