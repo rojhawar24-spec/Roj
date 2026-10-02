@@ -172,7 +172,7 @@ app.use(async(req,res,next)=>{
 });
 app.use((req,res,next)=>req.is('multipart/form-data')?next():verifyCsrf(req,res,next));
 
-function render(res,view,data={}) { return res.render(view,{...data}); }
+function render(res,view,data={}) { return res.render(view,{error:null,...data}); }
 function localRedirect(req,res,fallback='/') {
   const ref=req.get('referer');
   try { const u=ref ? new URL(ref) : null; if (u && u.protocol===req.protocol && u.host===req.get('host') && u.pathname.startsWith('/') && !u.pathname.startsWith('//')) return res.redirect(303,u.pathname + u.search); } catch {}

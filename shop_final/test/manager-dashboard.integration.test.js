@@ -156,6 +156,9 @@ test('bootstrapped manager can sign in and open dashboard', async t => {
   const dashboard = await fetch(`${base}/admin`, { headers: { cookie: managerCookie } });
   assert.equal(dashboard.status, 200);
   assert.match(await dashboard.text(), /Your store, at a glance\./);
+  const settingsPage = await fetch(`${base}/admin/settings`, { headers: { cookie: managerCookie } });
+  assert.equal(settingsPage.status,200);
+  assert.match(await settingsPage.text(),/SETUP & INTEGRATIONS/);
 
   const productPage = await fetch(`${base}/admin/products/new`, { headers: { cookie: managerCookie } });
   assert.equal(productPage.status, 200);
