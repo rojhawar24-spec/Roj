@@ -1,5 +1,5 @@
 <%- include('partials/header',{title:'Checkout'}) %>
-<section class="container page-head checkout-head"><div><span class="eyebrow">SECURE CHECKOUT · 1 STEP</span><h1>Complete your order.</h1><p>We need your email, phone number and delivery location so the order can be processed and the manager can fulfil it.</p></div></section>
+<section class="container page-head checkout-head"><%- include('partials/back-button', { fallback: '/cart' }) %><div><span class="eyebrow">SECURE CHECKOUT · 1 STEP</span><h1>Complete your order.</h1><p>We need your email, phone number and delivery location so the order can be processed and the manager can fulfil it.</p></div></section>
 <section class="container checkout-layout">
 <form class="panel form-stack" method="post" action="/checkout" data-submit-once>
   <input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="idempotencyKey" value="<%= idempotencyKey %>"><% if(guestAccessToken){ %><input type="hidden" name="guestAccessToken" value="<%= guestAccessToken %>"><% } %>

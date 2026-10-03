@@ -177,4 +177,26 @@
   saleInput?.addEventListener('input', updateDiscountPreview);
   productDiscountInput?.addEventListener('input', updateDiscountPreview);
   updateDiscountPreview();
+
+  // =========================================================
+  // Smart back button
+  // Uses history.back() only when the previous page is on the
+  // same origin, otherwise falls back to the button's data-fallback URL.
+  // =========================================================
+  document.querySelectorAll('[data-smart-back]').forEach(button => {
+    button.addEventListener('click', () => {
+      const fallback = button.dataset.fallback || '/shop';
+      const referrer = document.referrer;
+
+      try {
+        const url = new URL(referrer);
+        if (url.origin === window.location.origin && history.length > 1) {
+          history.back();
+          return;
+        }
+      } catch {}
+
+      window.location.href = fallback;
+    });
+  });
 })();

@@ -1,5 +1,5 @@
 <%- include('partials/header',{title:'Wishlist'}) %>
-<section class="container page-head"><span class="eyebrow">SAVED FOR LATER</span><h1>Your wishlist</h1><p>Keep products you like in one place and add them to your bag whenever you're ready.</p></section>
+<section class="container page-head"><%- include('partials/back-button', { fallback: '/account' }) %><span class="eyebrow">SAVED FOR LATER</span><h1>Your wishlist</h1><p>Keep products you like in one place and add them to your bag whenever you're ready.</p></section>
 <section class="container section">
   <% if(!products.length){ %>
     <div class="empty"><span class="empty-icon">♡</span><h2>Your wishlist is empty.</h2><p>Save products from the shop to find them here later.</p><a class="btn btn-dark" href="/shop">Browse products</a></div>
