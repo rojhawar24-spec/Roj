@@ -1,3 +1,30 @@
-<%- include('partials/header',{title:title}) %>
-<section class="container page-head"><span class="eyebrow">INFORMATION</span><h1><%= heading %></h1></section><section class="container section"><div class="panel policy-copy"><p><%= body %></p></div></section>
+<%- include('partials/header', {title: title}) %>
+
+<section class="container page-head policy-head">
+  <span class="eyebrow">INFORMATION</span>
+  <h1><%= heading %></h1>
+  <p>
+    Please read this information carefully before using the store.
+  </p>
+</section>
+
+<section class="container section policy-section">
+  <article
+    class="panel policy-copy"
+    aria-label="<%= heading %>"
+  >
+    <% if (body && body.trim()) { %>
+
+      <%= body %>
+
+    <% } else { %>
+
+      <p class="policy-empty">
+        This information has not been added yet.
+      </p>
+
+    <% } %>
+  </article>
+</section>
+
 <%- include('partials/footer') %>
