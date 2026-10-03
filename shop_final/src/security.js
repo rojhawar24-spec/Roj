@@ -86,6 +86,22 @@ export function dateTimeLocalToISOString(value, timeZone='Europe/Brussels') {
   if (month<1||month>12||day<1||day>31||hour>23||minute>59) return null;
   try {
     const wallMs=Date.UTC(year,month-1,day,hour,minute,0,0);
+
+    // Reject impossible calendar dates like 2026-02-31 or 2026-04-31.
+    // JavaScript Date silently rolls these into the next month, so we
+    // verify that the wall-clock parts round-trip unchanged before
+    // applying the timezone conversion.
+    const calendarCheck = new Date(wallMs);
+    if (
+      calendarCheck.getUTCFullYear() !== year ||
+      calendarCheck.getUTCMonth() !== month - 1 ||
+      calendarCheck.getUTCDate() !== day ||
+      calendarCheck.getUTCHours() !== hour ||
+      calendarCheck.getUTCMinutes() !== minute
+    ) {
+      return null;
+    }
+
     let offset=timezoneOffsetMs(wallMs,timeZone);
     let instantMs=wallMs-offset;
     const corrected=timezoneOffsetMs(instantMs,timeZone);

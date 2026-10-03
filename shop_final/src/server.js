@@ -651,14 +651,51 @@ app.post('/admin/stories/save',requireManager,upload.single('image'),verifyCsrf,
     if(!title||!published||!expires||new Date(expires)<=new Date(published))throw new Error('VALIDATION');
     if(!isSafeUrl(link))throw new Error('URL');
     const productId=validId(req.body.productId)?Number(req.body.productId):null;
-    if(productId && !await getProductById(productId))throw new Error('PRODUCT');
+    if (productId) {
+      const product = await getProductById(productId);
+      if (!product || !product.active) throw new Error('PRODUCT');
+    }
+    if (productId && link) throw new Error('BOTH_PRODUCT_AND_LINK');
     const image=req.file?await safeImagePath(req.file.buffer,req.file.mimetype):cleanText(req.body.imageUrl,500); savedImage=image;
     if(req.file&&!image)throw new Error('IMAGE'); if(!isSafeUrl(image))throw new Error('URL');
     const savedId=await adminCreateOrUpdateStory({id,title,body:cleanText(req.body.body,1000),imageUrl:image,linkUrl:link,productId,publishedAt:published,expiresAt:expires,active:req.body.active==='on'});
     await createAudit(req.user.id,'story_saved','story',savedId,{title}); if(req.file && previousImage && previousImage!==savedImage) await deleteUploadedAsset(previousImage); return res.redirect(303,'/admin/stories');
-  } catch { if(req.file && savedImage) await deleteUploadedAsset(savedImage); return res.status(400).render('admin/story-form',{story:req.body,products:await listProducts({onlyActive:true}),error:'Could not save story. Check dates, URL, product and image.'}); }
+  } catch (err) {
+    if(req.file && savedImage) await deleteUploadedAsset(savedImage);
+    const errors = {
+      PRODUCT: 'Choose an active product, or clear it and use a custom link instead.',
+      BOTH_PRODUCT_AND_LINK: 'Choose either a product or a custom link — not both.',
+      VALIDATION: 'Check the title and dates (expiry must be after publish).',
+      URL: 'Use a trusted HTTPS URL or a local path starting with "/".',
+      IMAGE: 'Use a valid JPG, PNG or WebP image up to 5 MB.'
+    };
+    return res.status(400).render('admin/story-form', {
+      story: req.body,
+      products: await listProducts({onlyActive:true}),
+      error: errors[err.message] || 'Could not save story. Check dates, URL, product and image.'
+    });
+  }
 });
-app.get('/admin/stories/:id/edit',requireManager,async(req,res)=>{const story=await getStory(Number(req.params.id));if(!story)return res.status(404).render('error',{title:'Story not found',message:'Story does not exist.'});render(res,'admin/story-form',{story,products:await listProducts({onlyActive:true}),error:null});});
+app.get('/admin/stories/:id/edit',requireManager,async(req,res)=>{
+  const story=await getStory(Number(req.params.id));
+  if(!story)return res.status(404).render('error',{title:'Story not found',message:'Story does not exist.'});
+
+  const activeProducts = await listProducts({onlyActive:true});
+  let products = activeProducts;
+
+  if (story.product_id) {
+    const already = activeProducts.some(p => Number(p.id) === Number(story.product_id));
+    if (!already) {
+      const current = await getProductById(story.product_id);
+      if (current) {
+        current.__inactive = true;
+        products = [current, ...activeProducts];
+      }
+    }
+  }
+
+  render(res,'admin/story-form',{story,products,error:null});
+});
 app.post('/admin/stories/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const story=await getStory(id);await deleteStory(id);await deleteUploadedAsset(story?.image_url);await createAudit(req.user.id,'story_deleted','story',id);}res.redirect(303,'/admin/stories');});
 
 app.get('/admin/orders',requireManager,async(req,res)=>{

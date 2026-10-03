@@ -332,8 +332,13 @@ export async function getProductBySlug(slug) { return getRow('SELECT p.*, c.name
 export async function getProductById(id) { return getRow('SELECT p.*, MAX(p.stock-p.reserved_stock,0) AS available_stock FROM products p WHERE id=?',[id]); }
 export async function getActiveStories(limit=24) {
   const safeLimit=Math.min(Math.max(Number(limit)||24,1),100);
-  return getRows(`SELECT s.*, p.name AS product_name, p.slug AS product_slug FROM stories s LEFT JOIN products p ON p.id=s.product_id
-    WHERE s.active=1 AND datetime(s.published_at)<=datetime('now') AND datetime(s.expires_at)>=datetime('now') ORDER BY s.published_at DESC LIMIT ?`,[safeLimit]);
+  // Join only when the product is active, so a story pointing at an inactive
+  // product falls back to its custom link (or /stories) instead of a 404.
+  return getRows(`SELECT s.*, p.name AS product_name, p.slug AS product_slug
+    FROM stories s
+    LEFT JOIN products p ON p.id=s.product_id AND p.active=1
+    WHERE s.active=1 AND datetime(s.published_at)<=datetime('now') AND datetime(s.expires_at)>=datetime('now')
+    ORDER BY s.published_at DESC LIMIT ?`,[safeLimit]);
 }
 export async function listStories(limit=100) { return getRows('SELECT s.*, p.name AS product_name FROM stories s LEFT JOIN products p ON p.id=s.product_id ORDER BY s.published_at DESC LIMIT ?',[Math.min(Math.max(Number(limit)||100,1),500)]); }
 export async function getStory(id) { return getRow('SELECT * FROM stories WHERE id=?',[id]); }
