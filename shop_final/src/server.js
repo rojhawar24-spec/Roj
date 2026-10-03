@@ -111,8 +111,10 @@ const checkoutReservationMinutes=Math.max(35,Math.min(1440,Number(process.env.CH
 const storeTimeZone=String(process.env.STORE_TIMEZONE||'Europe/Brussels').trim() || 'Europe/Brussels';
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024,files:1},fileFilter:(req,file,cb)=>{ if(!['image/jpeg','image/png','image/webp'].includes(file.mimetype)) return cb(new Error('INVALID_IMAGE_TYPE')); return cb(null,true); }});
 
-app.use(express.urlencoded({extended:false,limit:'24kb'}));
-app.use(express.json({limit:'24kb'}));
+// Body parsers: raised limits so admin Settings (Privacy 12k + Terms 12k + Shipping 8k + Returns 8k chars)
+// can be saved even after URL-encoding expansion and multi-byte UTF-8 (e.g. Kurdish/Arabic ≈ 4 bytes/char).
+app.use(express.urlencoded({extended:false,limit:'512kb'}));
+app.use(express.json({limit:'128kb'}));
 app.use(express.static(path.join(root,'public'),{index:false,maxAge:isProd?'7d':0}));
 
 app.get('/uploads/:filename',async(req,res,next)=>{
@@ -692,6 +694,13 @@ app.post('/admin/settings',requireManager,async(req,res)=>{
 
 app.use((req,res)=>res.status(404).render('error',{title:'Page not found',message:'The page you requested does not exist.'}));
 app.use((err,req,res,next)=>{
+  // Body parser errors — 413 Payload Too Large (raised limits still allow a clean response).
+  if(err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).render('error',{title:'Form too large',message:'Your submitted form is too large. Please shorten the policy texts and try again.'});
+  }
+  if(err?.type === 'entity.parse.failed') {
+    return res.status(400).render('error',{title:'Invalid submission',message:'The form could not be read. Please try again.'});
+  }
   if(err?.code==='LIMIT_FILE_SIZE')return res.status(400).render('error',{title:'File too large',message:'Images must be 5 MB or smaller.'});
   if(err?.code==='LIMIT_UNEXPECTED_FILE')return res.status(400).render('error',{title:'Upload rejected',message:'Only one image may be uploaded.'});
   if(err?.message==='INVALID_IMAGE_TYPE')return res.status(400).render('error',{title:'Upload rejected',message:'Only JPG, PNG or WebP images are supported.'});
