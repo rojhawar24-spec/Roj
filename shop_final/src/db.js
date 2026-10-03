@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { db, execute, executeMultiple, getRow, getRows, run } from './database.js';
 import { normalizeProductDiscountPercent, applyPercentDiscountCents } from './pricing.js';
+import { isValidPhone } from './security.js';
 
 await execute('PRAGMA foreign_keys = ON');
 
@@ -437,7 +438,7 @@ export async function createOrderAtomic({userId, email, guestAccessTokenHash=nul
     const reservationExpires = new Date(Date.now() + minutes * 60 * 1000).toISOString();
     const note=String(customerNote||'').slice(0,500);
     const phone=String(customerPhone||'').trim().slice(0,32);
-    if(!/^\+?[0-9 ()-]{7,32}$/.test(phone)) throw new Error('INVALID_PHONE');
+    if(!isValidPhone(phone)) throw new Error('INVALID_PHONE');
     const info = await run(`INSERT INTO orders(user_id,email,customer_phone,status,payment_provider,client_token,guest_access_token_hash,subtotal_cents,automatic_discount_cents,discount_cents,total_cents,currency,shipping_name,shipping_address,shipping_city,shipping_postal_code,shipping_country,shipping_cents,customer_note,terms_accepted_at,reservation_expires_at,payment_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[userId,email,phone,'pending',paymentProvider,clientToken,guestAccessTokenHash,subtotal,automaticDiscount,discount,total,currency,shipping.name,shipping.address,shipping.city,shipping.postalCode,shipping.country,safeShippingCents,note,termsAcceptedAt,reservationExpires,null],tx);
     const orderId = Number(info.lastInsertRowid);
     for (const line of normalized) {

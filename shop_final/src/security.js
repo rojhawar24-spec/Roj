@@ -138,3 +138,26 @@ export const isValidCurrency = value => {
 };
 
 export const isStrongEnoughPassword = value => typeof value === 'string' && value.length >= 12 && value.length <= 200;
+
+// =========================================================
+// Phone validation
+// Supports international formats:
+//   +964 750 123 4567   (Iraq / Kurdistan)
+//   0750 123 4567       (local)
+//   +31 6 12345678      (Netherlands)
+//   +1 (555) 123-4567   (USA)
+// Requires 7-20 actual digits. Rejects strings like "-------".
+// =========================================================
+export function isValidPhone(value) {
+  const s = String(value ?? '').trim();
+
+  if (s.length === 0 || s.length > 32) return false;
+
+  // Only allow: optional leading +, digits, spaces, parentheses, dashes
+  if (!/^\+?[0-9 ()-]+$/.test(s)) return false;
+
+  // Count actual digits
+  const digits = (s.match(/\d/g) || []).length;
+
+  return digits >= 7 && digits <= 20;
+}

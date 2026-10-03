@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import db, { cleanupSessions, releaseExpiredReservations, getSetting, setSetting, baseEffectivePrice, effectivePrice as dbEffectivePrice, listCategories, createCategory, updateCategory, deleteCategory, listProducts, countProducts, getProductBySlug, getProductById, getActiveStories, listStories, getStory, listCoupons, getCoupon, getCouponById, createAudit, listAuditLogs, listOrders, countOrders, getOrder, listUserOrders, getOrderByClientToken, createOrderAtomic, markOrderPaid, cancelPendingOrder, saveCheckoutSession, saveSessionCart, saveSessionCoupon, createUser, setOrderStatus, saveSessionWishlist, markConfirmationEmailSent, adminCreateOrUpdateProduct, deleteProduct, adminCreateOrUpdateStory, deleteStory, adminCreateOrUpdateCoupon, deleteCoupon, listCustomers, countCustomers, getDashboardStats, getUserAuthByEmail, updateUserPassword, destroyUserSessionsExcept } from './db.js';
 import { getRow } from './database.js';
 import { attachAuth, authenticate, hashPassword, verifyPassword, login, logout, requireAuth, requireManager } from './auth.js';
-import { csrfToken, verifyCsrf, cleanText, validId, moneyCents, formatDateTimeLocal, formatDateTimeDisplay, dateTimeLocalToISOString, isSafeUrl, isSafeLocalPath, assertUploadSignature, isValidCurrency, STRIPE_TWO_DECIMAL_CURRENCIES, isStrongEnoughPassword } from './security.js';
+import { csrfToken, verifyCsrf, cleanText, validId, moneyCents, formatDateTimeLocal, formatDateTimeDisplay, dateTimeLocalToISOString, isSafeUrl, isSafeLocalPath, assertUploadSignature, isValidCurrency, STRIPE_TWO_DECIMAL_CURRENCIES, isStrongEnoughPassword, isValidPhone } from './security.js';
 let aiService = null;
 try { aiService = await import('./services/ai.js'); } catch (error) {
   if (!(error?.code === 'ERR_MODULE_NOT_FOUND' && String(error?.message || '').includes('services/ai.js'))) throw error;
@@ -452,7 +452,7 @@ app.post('/checkout',checkoutLimiter,async(req,res)=>{
   const shipping={name:cleanText(req.body.shippingName,120),address:cleanText(req.body.shippingAddress,200),city:cleanText(req.body.shippingCity,100),postalCode:cleanText(req.body.shippingPostalCode,20),country};
   const termsAccepted=req.body.termsAccepted==='on';
   const customerNote=cleanText(req.body.customerNote,500);
-  if(!/^\+?[0-9 ()-]{7,32}$/.test(customerPhone)||country.length<2||country.length>80||Object.values(shipping).some(v=>!v)||!termsAccepted) return render(res,'checkout',{...checkoutView,error:'Enter a valid phone number, complete every required delivery field and accept the store terms before continuing.'});
+  if(!isValidPhone(customerPhone)||country.length<2||country.length>80||Object.values(shipping).some(v=>!v)||!termsAccepted) return render(res,'checkout',{...checkoutView,error:'Enter a valid phone number (at least 7 digits, e.g. +964 750 123 4567 or 0750 123 4567), complete every required delivery field and accept the store terms before continuing.'});
   let idem=cleanText(req.body.idempotencyKey,100);
   if(!/^[A-Za-z0-9_-]{24,100}$/.test(idem)) return render(res,'checkout',{...checkoutView,error:'Please refresh and retry this checkout.'});
   let prior=await getOrderByClientToken(idem);
