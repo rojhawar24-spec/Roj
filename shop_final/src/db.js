@@ -537,7 +537,13 @@ export async function adminCreateOrUpdateProduct(data) {
   }
   return Number((await run(`INSERT INTO products(name,slug,short_description,description,image_url,price_cents,sale_price_cents,sale_start,sale_end,automatic_discount_percent,sku,stock,category_id,tags,featured,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,values)).lastInsertRowid);
 }
-export async function deleteProduct(id) { await run('DELETE FROM products WHERE id=?',[id]); }
+// Atomic: refuses to delete when reserved_stock > 0 or product does not exist.
+// Returns true only when exactly one row was removed. This closes the
+// check-then-delete race between admin delete and concurrent checkout reservation.
+export async function deleteProduct(id) {
+  const result = await run('DELETE FROM products WHERE id=? AND reserved_stock=0',[id]);
+  return result.changes === 1;
+}
 export async function adminCreateOrUpdateStory(data) {
   const values = [data.title,data.body,data.imageUrl,data.linkUrl || '',data.productId || null,data.publishedAt,data.expiresAt,data.active?1:0];
   if (data.id) { const changed=(await run(`UPDATE stories SET title=?,body=?,image_url=?,link_url=?,product_id=?,published_at=?,expires_at=?,active=? WHERE id=?`,[...values,data.id])).changes; if(changed!==1) throw new Error('NOT_FOUND'); return Number(data.id); }

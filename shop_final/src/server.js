@@ -622,7 +622,20 @@ app.post('/admin/products/save',requireManager,upload.single('image'),verifyCsrf
   }
 });
 app.get('/admin/products/:id/edit',requireManager,async(req,res)=>{const product=await getProductById(Number(req.params.id));if(!product)return res.status(404).render('error',{title:'Product not found',message:'Product does not exist.'});render(res,'admin/product-form',{product,categories:await listCategories(),currency:await getSetting('currency','EUR'),error:null});});
-app.post('/admin/products/delete',requireManager,async(req,res)=>{const id=Number(req.body.id);if(validId(id)){const p=await getProductById(id);if(p?.reserved_stock>0)return res.status(400).render('error',{title:'Product is reserved',message:'This product cannot be deleted while checkout stock is reserved.'});await deleteProduct(id);await deleteUploadedAsset(p?.image_url);await createAudit(req.user.id,'product_deleted','product',id);}res.redirect(303,'/admin/products');});
+// Atomic delete: DELETE ... WHERE id=? AND reserved_stock=0. Closes the check-then-delete race
+// between admin delete and concurrent checkout reservation. Only cleans up the uploaded asset
+// and writes audit AFTER the row has actually been removed.
+app.post('/admin/products/delete',requireManager,async(req,res)=>{
+  const id=Number(req.body.id);
+  if(!validId(id)) return res.redirect(303,'/admin/products');
+  const p=await getProductById(id);
+  if(!p) return res.redirect(303,'/admin/products');
+  const deleted=await deleteProduct(id);
+  if(!deleted) return res.status(400).render('error',{title:'Product is reserved',message:'This product cannot be deleted while checkout stock is reserved.'});
+  await deleteUploadedAsset(p.image_url);
+  await createAudit(req.user.id,'product_deleted','product',id);
+  res.redirect(303,'/admin/products');
+});
 
 app.get('/admin/stories',requireManager,async(req,res)=>render(res,'admin/stories',{stories:await listStories()}));
 app.get('/admin/stories/new',requireManager,async(req,res)=>render(res,'admin/story-form',{story:null,products:await listProducts({onlyActive:true}),error:null}));
